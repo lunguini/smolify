@@ -10,6 +10,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/pprof"
+	"time"
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/window"
@@ -21,6 +24,8 @@ import (
 func main() {
 	gui := flag.Bool("gui", false, "run in a native window instead of the terminal")
 	signOut := flag.Bool("sign-out", false, "forget the stored Spotify sign-in and exit")
+	debugLog := flag.String("debug-log", "", "log player events, commands, requests, and memory to this file")
+	heapProfile := flag.String("heap-profile", "", "write a heap profile to this file on exit")
 	flag.Parse()
 
 	dir, err := os.UserConfigDir()
@@ -43,15 +48,18 @@ func main() {
 	}
 	defer p.Close()
 
-	// SMOLIFY_DEBUG=<file> logs what the UI receives and sends.
 	var debug io.Writer
-	if path := os.Getenv("SMOLIFY_DEBUG"); path != "" {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if *debugLog != "" {
+		f, err := os.OpenFile(*debugLog, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
 			fail(err)
 		}
 		defer f.Close()
 		debug = f
+		go logMemory(ctx, f)
+	}
+	if *heapProfile != "" {
+		defer writeHeapProfile(*heapProfile)
 	}
 	a := app.New(p, app.HTTPImages{}, debug)
 	if *gui {
@@ -61,6 +69,39 @@ func main() {
 	}
 	if err != nil {
 		fail(err)
+	}
+}
+
+// logMemory writes the Go runtime's memory figures to w every 10 seconds:
+// what Go holds, against the process's footprint in Activity Monitor (the
+// rest is the audio stack, system frameworks, and other native memory).
+func logMemory(ctx context.Context, w io.Writer) {
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		mib := func(n uint64) float64 { return float64(n) / (1 << 20) }
+		fmt.Fprintf(w, "%s memory: heap live %.1f MiB, heap in use %.1f MiB, heap from OS %.1f MiB, Go total %.1f MiB, stacks %.1f MiB, GCs %d\n",
+			time.Now().Format("15:04:05.000"), mib(m.HeapAlloc), mib(m.HeapInuse), mib(m.HeapSys-m.HeapReleased), mib(m.Sys), mib(m.StackSys), m.NumGC)
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func writeHeapProfile(path string) {
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "smolify:", err)
+		return
+	}
+	defer f.Close()
+	runtime.GC()
+	if err := pprof.WriteHeapProfile(f); err != nil {
+		fmt.Fprintln(os.Stderr, "smolify:", err)
 	}
 }
 

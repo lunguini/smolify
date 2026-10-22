@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/window"
 
 	"github.com/lunguini/smolify/internal/player"
@@ -22,6 +24,59 @@ func TestWindowSnapshot(t *testing.T) {
 	if dir == "" {
 		t.Skip("set SMOLIFY_SNAPSHOT=<dir> to render")
 	}
+	a := sampleApp()
+	img, err := window.Snapshot(a, window.Options{Width: 110, Height: 34}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(dir, "smolify-main.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// BenchmarkWindowFrame renders the main window at a run of sizes, as a
+// live resize does.
+func BenchmarkWindowFrame(b *testing.B) {
+	a := sampleApp()
+	for i := 0; b.Loop(); i++ {
+		if _, err := window.Snapshot(a, window.Options{Width: 90 + i%40, Height: 30 + i%10}, 2); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkWindowScroll renders a 2000-track playlist scrolled a row
+// further each frame, as a wheel does.
+func BenchmarkWindowScroll(b *testing.B) {
+	a := sampleApp()
+	s := a.State
+	l := player.Listing{URI: "p:1", Ready: true, Length: 2000, Cached: 2000}
+	for i := range 2000 {
+		l.Tracks = append(l.Tracks, player.Track{
+			URI: fmt.Sprintf("spotify:track:%d", i), Name: fmt.Sprintf("A fairly long song title number %d (Extended Mix)", i),
+			Artists: []string{fmt.Sprintf("Artist %d", i%300), "Featured Guest"}, Album: fmt.Sprintf("Album with a long name %d", i%150),
+			Duration: time.Duration(150+i%200) * time.Second,
+		})
+	}
+	s.listings["p:1"] = l
+	s.tracks.SetCount(2000)
+	s.tracks.SetHeight(20)
+	for b.Loop() {
+		s.tracks.Scroll(1)
+		if _, err := window.Snapshot(a, window.Options{Width: 110, Height: 34}, 1); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// sampleApp is the app with a library, a listed playlist, and a track
+// playing.
+func sampleApp() flatte.App[State] {
 	a := New(&fake{}, nil, nil)
 	s := a.State
 	s.ready = true
@@ -36,23 +91,27 @@ func TestWindowSnapshot(t *testing.T) {
 	}
 	s.rail.SetCount(len(s.playlists))
 	s.rail.SetHeight(20)
+	s.shown = "p:1"
+	names := []struct{ name, artist, album string }{
+		{"OverThink", "Kuo, Lin", "OverThink"}, {"Gravity", "Dua", "Fall"}, {"Low Tide", "Mara", "Shores"},
+		{"Neon Rain", "Kuo", "City Lights"}, {"Paper Planes", "Lin, Vee", "Paper Planes"}, {"Slow Motion", "Odd Hours", "Late"},
+		{"Glass", "Mara", "Shores"}, {"Northbound", "The Fields", "Maps"}, {"Static", "Vee", "Static"},
+	}
+	l := player.Listing{URI: "p:1", Ready: true, Length: len(names), Cached: len(names)}
+	for i, n := range names {
+		l.Tracks = append(l.Tracks, player.Track{URI: fmt.Sprintf("spotify:track:%d", i), Name: n.name, Artists: []string{n.artist}, Album: n.album, Duration: time.Duration(150+i*17) * time.Second})
+	}
+	s.listings["p:1"] = l
+	s.tracks.SetCount(len(l.Tracks))
+	s.tracks.SetHeight(12)
+	s.tracks.Select(2)
+	s.liked["spotify:track:0"], s.liked["spotify:track:4"] = true, true
 	s.covers["c:1"] = art(color.RGBA{230, 80, 120, 255}, color.RGBA{60, 40, 160, 255})
 	s.covers["c:2"] = art(color.RGBA{30, 200, 140, 255}, color.RGBA{20, 40, 60, 255})
 	s.covers["c:t"] = art(color.RGBA{250, 180, 60, 255}, color.RGBA{120, 30, 60, 255})
-	s.track = &player.Track{URI: "t:1", Name: "OverThink", Artists: []string{"Kuo", "Lin"}, Duration: 213 * time.Second, Cover: "c:t", ContextURI: "p:1"}
+	s.track = &player.Track{URI: "spotify:track:0", Name: "OverThink", Artists: []string{"Kuo", "Lin"}, Duration: 213 * time.Second, Cover: "c:t", ContextURI: "p:1"}
 	s.context, s.playing, s.position, s.volume = "p:1", true, 74*time.Second, 60
-	img, err := window.Snapshot(a, window.Options{Width: 110, Height: 34}, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.Create(filepath.Join(dir, "smolify-main.png"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	if err := png.Encode(f, img); err != nil {
-		t.Fatal(err)
-	}
+	return a
 }
 
 // art is a 300×300 diagonal gradient with a soft disc, standing in for

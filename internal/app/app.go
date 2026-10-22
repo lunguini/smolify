@@ -31,6 +31,10 @@ type Backend interface {
 	SetVolume(ctx context.Context, v int) error
 	SetShuffle(ctx context.Context, on bool) error
 	SetRepeat(ctx context.Context, on bool) error
+	ContextTracks(ctx context.Context, uri string) (player.Listing, error)
+	Queue(ctx context.Context, uri string) error
+	SetLiked(ctx context.Context, uris []string, liked bool) error
+	Liked(ctx context.Context, uris []string) ([]bool, error)
 }
 
 // Images fetches cover art.
@@ -60,25 +64,51 @@ type State struct {
 	repeat   player.Repeat
 	context  string // the playing context's URI
 
+	username  string // the signed-in account ("": not known yet)
 	playlists []player.Playlist
 	rail      flatui.List
 	loaded    bool // the library has been read
+
+	// listings are context tracks by context URI, as far as listed; listing
+	// marks requests in flight. tracks is the track table's cursor over the
+	// selected list's listing, shown the URI it belongs to.
+	listings map[string]player.Listing
+	listing  map[string]bool
+	tracks   flatui.List
+	shown    string
+	focus    pane
+
+	// liked is Liked Songs membership by track URI (absent: not known);
+	// asking marks requests in flight.
+	liked  map[string]bool
+	asking map[string]bool
 
 	// covers are fetched cover images by URL; fetching marks requests in
 	// flight.
 	covers   map[string]image.Image
 	fetching map[string]bool
 
-	// drag is the slider being dragged ("" none), and dragValue where.
+	// drag is the slider or scroll bar being dragged ("" none), and
+	// dragValue where (a slider's); sliders are their rects in the last
+	// layout.
 	drag      string
 	dragValue float64
 	sliders   map[string]layout.Rect
 
-	status string // the last error or notice
+	status string // the last error
+	notice string // the last confirmation ("Added to queue")
 
 	// debug, when set, records what the UI receives and sends.
 	debug io.Writer
 }
+
+// pane is where the arrow keys act.
+type pane int
+
+const (
+	paneLibrary pane = iota
+	paneTracks
+)
 
 // logf writes a debug line when a debug log is set.
 func (s *State) logf(format string, args ...any) {
@@ -90,6 +120,9 @@ func (s *State) logf(format string, args ...any) {
 // Node IDs.
 const (
 	idRail     = "rail"
+	idTracks   = "tracks"
+	idRailBar  = "rail-bar"
+	idTrackBar = "tracks-bar"
 	idPlay     = "play"
 	idPrev     = "prev"
 	idNext     = "next"
@@ -98,13 +131,19 @@ const (
 	idProgress = "progress"
 	idVolume   = "volume"
 	idPlayList = "play-playlist"
+	idLike     = "like"
 	idOpenPair = "open-pair"
 )
 
 // New is the app for backend be. debug, when not nil, receives a log of
 // player events, commands, and request failures.
 func New(be Backend, img Images, debug io.Writer) flatte.App[State] {
-	s := &State{be: be, img: img, covers: map[string]image.Image{}, fetching: map[string]bool{}, volMax: 100, debug: debug}
+	s := &State{
+		be: be, img: img, volMax: 100, debug: debug,
+		covers: map[string]image.Image{}, fetching: map[string]bool{},
+		listings: map[string]player.Listing{}, listing: map[string]bool{},
+		liked: map[string]bool{}, asking: map[string]bool{},
+	}
 	return flatte.App[State]{
 		State: s, Init: Init, Handle: Handle, View: View, Menus: Menus, ContextMenu: ContextMenu,
 	}
@@ -128,10 +167,16 @@ func Init(s *State, fx flatte.Effects[State]) {
 	_ = flatte.Every(fx, "tick", time.Second, tick)
 }
 
-// tick advances the position of a playing track by a second.
+// tick advances the position of a playing track by a second, and asks
+// again for a selected list the player is still listing.
 func tick(s *State, _ time.Time) {
 	if s.playing && s.track != nil && s.drag != idProgress {
 		s.position = min(s.position+time.Second, s.track.Duration)
+	}
+	if pl, ok := s.selected(); ok {
+		if l, ok := s.listings[pl.URI]; ok && !l.Complete() {
+			loadTracks(s, pl.URI)
+		}
 	}
 }
 
@@ -154,6 +199,7 @@ func onPlayer(s *State, ev player.Event) {
 			s.context = e.ContextURI
 		}
 		fetchCover(s, e.Cover)
+		askLiked(s, []player.Track{e})
 	case player.Playing:
 		s.playing, s.context = true, nonEmpty(e.ContextURI, s.context)
 	case player.Paused:
@@ -194,10 +240,7 @@ func loadLibrary(s *State) {
 			return
 		}
 		s.playlists = pls
-		s.rail.SetCount(len(pls))
-		if pl, ok := s.selected(); ok {
-			fetchCover(s, pl.Image)
-		}
+		libraryChanged(s)
 	})
 }
 
@@ -218,6 +261,119 @@ func refreshStatus(s *State) {
 		if st.Track != nil {
 			s.track, s.position = st.Track, st.Track.Position
 			fetchCover(s, st.Track.Cover)
+			askLiked(s, []player.Track{*st.Track})
+		}
+		if st.Username != "" && s.username == "" {
+			s.username = st.Username
+			libraryChanged(s)
+		}
+	})
+}
+
+// libraryChanged follows a change to the library's entries, keeping the
+// same list selected when it is still there.
+func libraryChanged(s *State) {
+	lib := s.library()
+	s.rail.SetCount(len(lib))
+	for i, pl := range lib {
+		if pl.URI == s.shown {
+			s.rail.Select(i)
+			break
+		}
+	}
+	showSelected(s)
+}
+
+// library is the rail's entries: Liked Songs (once the account is known),
+// then the playlists.
+func (s *State) library() []player.Playlist {
+	if s.username == "" {
+		return s.playlists
+	}
+	liked := player.Playlist{URI: player.LikedSongs(s.username), Name: "Liked Songs", Owner: s.username}
+	return append([]player.Playlist{liked}, s.playlists...)
+}
+
+// loadTracks asks for the tracks of the context uri, unless they are
+// listed already or asked for.
+func loadTracks(s *State, uri string) {
+	if l, ok := s.listings[uri]; s.listing[uri] || ok && l.Complete() {
+		return
+	}
+	s.listing[uri] = true
+	be := s.be
+	flatte.Go(s.fx, "tracks", func(ctx context.Context) (player.Listing, error) {
+		return be.ContextTracks(ctx, uri)
+	}, func(s *State, l player.Listing, err error) {
+		delete(s.listing, uri)
+		if err != nil {
+			s.logf("tracks %s: %v", uri, err)
+			s.status = "Could not list the tracks: " + err.Error()
+			return
+		}
+		s.listings[uri] = l
+		if uri == s.shown {
+			s.tracks.SetCount(len(l.Tracks))
+		}
+		askLiked(s, l.Tracks)
+	})
+}
+
+// askLiked asks whether the tracks not known yet are in Liked Songs.
+func askLiked(s *State, tracks []player.Track) {
+	var uris []string
+	for _, t := range tracks {
+		_, known := s.liked[t.URI]
+		if strings.HasPrefix(t.URI, "spotify:track:") && !known && !s.asking[t.URI] {
+			s.asking[t.URI] = true
+			uris = append(uris, t.URI)
+		}
+	}
+	if len(uris) == 0 {
+		return
+	}
+	be := s.be
+	flatte.Go(s.fx, "liked", func(ctx context.Context) ([]bool, error) {
+		return be.Liked(ctx, uris)
+	}, func(s *State, liked []bool, err error) {
+		for i, uri := range uris {
+			delete(s.asking, uri)
+			if err == nil && i < len(liked) {
+				s.liked[uri] = liked[i]
+			}
+		}
+		if err != nil {
+			s.logf("liked: %v", err)
+		}
+	})
+}
+
+// setLiked saves the track uri to Liked Songs or removes it, shown at once
+// and put back if the request fails.
+func setLiked(s *State, uri string, on bool) {
+	if !strings.HasPrefix(uri, "spotify:track:") {
+		return
+	}
+	was, known := s.liked[uri]
+	s.liked[uri] = on
+	if s.username != "" {
+		delete(s.listings, player.LikedSongs(s.username)) // listed again when shown
+	}
+	be := s.be
+	flatte.Go(s.fx, "like", func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, be.SetLiked(ctx, []string{uri}, on)
+	}, func(s *State, _ struct{}, err error) {
+		s.logf("request like %s %v: err=%v", uri, on, err)
+		if err != nil {
+			if known {
+				s.liked[uri] = was
+			} else {
+				delete(s.liked, uri)
+			}
+			s.status = "Could not update Liked Songs: " + err.Error()
+		}
+		if s.username != "" && s.shown == player.LikedSongs(s.username) {
+			loadTracks(s, s.shown)
 		}
 	})
 }
@@ -252,13 +408,25 @@ func send(s *State, name string, req func(context.Context, Backend) error) {
 	})
 }
 
-// selected is the playlist under the rail's cursor.
+// selected is the list under the rail's cursor.
 func (s *State) selected() (player.Playlist, bool) {
+	lib := s.library()
 	i := s.rail.Cursor()
-	if i < 0 || i >= len(s.playlists) {
+	if i < 0 || i >= len(lib) {
 		return player.Playlist{}, false
 	}
-	return s.playlists[i], true
+	return lib[i], true
+}
+
+// selectedTrack is the track under the table's cursor, in the selected
+// list.
+func (s *State) selectedTrack() (player.Track, bool) {
+	l, ok := s.listings[s.shown]
+	i := s.tracks.Cursor()
+	if !ok || i < 0 || i >= len(l.Tracks) {
+		return player.Track{}, false
+	}
+	return l.Tracks[i], true
 }
 
 // Commands, from keys, clicks, and menus.
@@ -273,6 +441,10 @@ const (
 	cmdSeekAhead  = "seek-ahead"
 	cmdSeekBack   = "seek-back"
 	cmdPlayList   = "play-playlist"
+	cmdPlayTrack  = "play-track"
+	cmdQueue      = "queue"
+	cmdLike       = "like"       // the playing track
+	cmdLikeTrack  = "like-track" // the selected track
 	cmdQuit       = "quit"
 )
 
@@ -284,6 +456,7 @@ const (
 // command runs a command.
 func command(s *State, id string, fx flatte.Effects[State]) {
 	s.logf("command %s (track loaded: %v, playing: %v)", id, s.track != nil, s.playing)
+	s.notice = ""
 	switch id {
 	case cmdPlayPause:
 		if s.track == nil {
@@ -326,6 +499,29 @@ func command(s *State, id string, fx flatte.Effects[State]) {
 		}
 		s.status = ""
 		send(s, "play", func(ctx context.Context, be Backend) error { return be.Play(ctx, pl.URI, "") })
+	case cmdPlayTrack:
+		t, ok := s.selectedTrack()
+		if !ok {
+			return
+		}
+		ctxURI := s.shown
+		s.status = ""
+		send(s, "play", func(ctx context.Context, be Backend) error { return be.Play(ctx, ctxURI, t.URI) })
+	case cmdQueue:
+		t, ok := s.selectedTrack()
+		if !ok {
+			return
+		}
+		s.notice = "Added “" + nonEmpty(t.Name, "the track") + "” to the queue."
+		send(s, "add-to-queue", func(ctx context.Context, be Backend) error { return be.Queue(ctx, t.URI) })
+	case cmdLike:
+		if s.track != nil {
+			setLiked(s, s.track.URI, !s.liked[s.track.URI])
+		}
+	case cmdLikeTrack:
+		if t, ok := s.selectedTrack(); ok {
+			setLiked(s, t.URI, !s.liked[t.URI])
+		}
 	case cmdQuit:
 		fx.Quit()
 	}
@@ -362,16 +558,24 @@ func Handle(s *State, ev flatte.Event, fx flatte.Effects[State]) {
 		if r, ok := e.Rects[idRail]; ok {
 			s.rail.SetHeight(max(r.H, 1))
 		}
+		if r, ok := e.Rects[idTracks]; ok {
+			s.tracks.SetHeight(max(r.H, 1))
+		}
 		s.sliders = map[string]layout.Rect{}
-		for _, id := range []string{idProgress, idVolume} {
+		for _, id := range []string{idProgress, idVolume, idRailBar, idTrackBar} {
 			if r, ok := e.Rects[id]; ok {
 				s.sliders[id] = r
 			}
 		}
 	case flatte.MenuEvent:
-		// A playlist's context menu acts on the playlist clicked.
-		if i, ok := railIndex(e.Target); ok {
+		// A context menu acts on the row clicked.
+		if i, ok := rowIndex(idRail, e.Target); ok {
 			s.rail.Select(i)
+			showSelected(s)
+		}
+		if i, ok := rowIndex(idTracks, e.Target); ok {
+			s.tracks.Select(i)
+			s.focus = paneTracks
 		}
 		command(s, e.ID, fx)
 	case flatte.KeyEvent:
@@ -387,14 +591,20 @@ func handleKey(s *State, k flatte.KeyEvent, fx flatte.Effects[State]) {
 	switch k.Key {
 	case flatte.KeyEscape, flatte.KeyCtrlC:
 		fx.Quit()
-	case flatte.KeyUp:
-		s.rail.MoveUp()
-		showSelected(s)
-	case flatte.KeyDown:
-		s.rail.MoveDown()
-		showSelected(s)
+	case flatte.KeyTab: // two panes, so Shift+Tab is the same
+		if s.focus == paneLibrary && len(s.listings[s.shown].Tracks) > 0 {
+			s.focus = paneTracks
+		} else {
+			s.focus = paneLibrary
+		}
+	case flatte.KeyUp, flatte.KeyDown:
+		move(s, s.focus, k.Key == flatte.KeyUp)
 	case flatte.KeyEnter:
-		command(s, cmdPlayList, fx)
+		if s.focus == paneTracks {
+			command(s, cmdPlayTrack, fx)
+		} else {
+			command(s, cmdPlayList, fx)
+		}
 	case flatte.KeyCharacter:
 		if k.Rune == 'q' && k.Mod == 0 {
 			fx.Quit()
@@ -402,18 +612,54 @@ func handleKey(s *State, k flatte.KeyEvent, fx flatte.Effects[State]) {
 	}
 }
 
-// showSelected fetches the selected playlist's cover.
-func showSelected(s *State) {
-	if pl, ok := s.selected(); ok {
-		fetchCover(s, pl.Image)
+// move moves the cursor of pane p.
+func move(s *State, p pane, up bool) {
+	switch {
+	case p == paneTracks && up:
+		s.tracks.MoveUp()
+	case p == paneTracks:
+		s.tracks.MoveDown()
+	case up:
+		s.rail.MoveUp()
+		showSelected(s)
+	default:
+		s.rail.MoveDown()
+		showSelected(s)
 	}
+}
+
+// showSelected shows the selected list: its cover, and its tracks from the
+// top when it is a different list.
+func showSelected(s *State) {
+	pl, ok := s.selected()
+	if !ok {
+		return
+	}
+	fetchCover(s, pl.Image)
+	if pl.URI != s.shown {
+		s.shown = pl.URI
+		s.tracks.SetCount(len(s.listings[pl.URI].Tracks))
+		s.tracks.Select(0)
+	}
+	loadTracks(s, pl.URI)
 }
 
 func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	if m.Window != "" {
 		return
 	}
-	// A slider drag follows the pointer and acts on release.
+	// A scroll bar drag scrolls its list; a slider drag follows the pointer
+	// and acts on release.
+	if s.drag == idRailBar || s.drag == idTrackBar {
+		r := s.sliders[s.drag]
+		switch m.Action {
+		case flatte.MouseMotion:
+			scrollBar(s, s.drag, m.Y-r.Y, r.H)
+		case flatte.MouseRelease:
+			s.drag = ""
+		}
+		return
+	}
 	if s.drag != "" {
 		r := s.sliders[s.drag]
 		v := layout.Slider{}.ValueAt(m.X-r.X, r.W)
@@ -436,13 +682,23 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	if m.Button != flatte.MouseLeft || m.Action != flatte.MousePress {
 		return
 	}
-	if i, ok := railIndex(m.Target); ok {
-		if i == s.rail.Cursor() {
+	if i, ok := rowIndex(idRail, m.Target); ok {
+		if i == s.rail.Cursor() && s.focus == paneLibrary {
 			command(s, cmdPlayList, fx) // a click on the selected one plays it
 			return
 		}
+		s.focus = paneLibrary
 		s.rail.Select(i)
 		showSelected(s)
+		return
+	}
+	if i, ok := rowIndex(idTracks, m.Target); ok {
+		if i == s.tracks.Cursor() && s.focus == paneTracks {
+			command(s, cmdPlayTrack, fx)
+			return
+		}
+		s.focus = paneTracks
+		s.tracks.Select(i)
 		return
 	}
 	switch m.Target {
@@ -458,8 +714,13 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 		command(s, cmdRepeat, fx)
 	case idPlayList:
 		command(s, cmdPlayList, fx)
+	case idLike:
+		command(s, cmdLike, fx)
 	case idOpenPair:
 		openURL(s, s.pairing.URL)
+	case idRailBar, idTrackBar:
+		s.drag = m.Target
+		scrollBar(s, m.Target, m.Y-m.TargetRect.Y, m.TargetRect.H)
 	case idProgress, idVolume:
 		if m.Target == idProgress && s.track == nil {
 			return
@@ -469,9 +730,14 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	}
 }
 
-// wheel scrolls the library, or nudges the slider under the pointer.
+// wheel scrolls the list under the pointer (leaving its selection), or
+// nudges the slider under it.
 func wheel(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	up := m.Button == flatte.MouseWheelUp
+	rows := 1
+	if up {
+		rows = -1
+	}
 	switch {
 	case m.Target == idVolume && up:
 		command(s, cmdVolumeUp, fx)
@@ -481,11 +747,31 @@ func wheel(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 		command(s, cmdSeekAhead, fx)
 	case m.Target == idProgress:
 		command(s, cmdSeekBack, fx)
-	case up:
-		s.rail.MoveUp()
+	case strings.HasPrefix(m.Target, idTracks):
+		s.tracks.Scroll(rows)
 	default:
-		s.rail.MoveDown()
+		s.rail.Scroll(rows)
 	}
+}
+
+// list is the list a scroll bar scrolls.
+func (s *State) list(bar string) *flatui.List {
+	if bar == idTrackBar {
+		return &s.tracks
+	}
+	return &s.rail
+}
+
+// listBar is the scroll bar of list l.
+func listBar(l flatui.List, id string) layout.ScrollBar {
+	return layout.ScrollBar{NodeBase: layout.NodeBase{ID: id}, Offset: l.Offset(), Visible: l.Height(), Total: l.Count()}
+}
+
+// scrollBar scrolls the list of bar for a press or drag at line y of the
+// bar, height lines tall, leaving its selection.
+func scrollBar(s *State, bar string, y, height int) {
+	l := s.list(bar)
+	l.Scroll(listBar(*l, bar).OffsetAt(y, height) - l.Offset())
 }
 
 // release acts on a slider let go at value v.
@@ -500,9 +786,9 @@ func release(s *State, id string, v float64) {
 	}
 }
 
-// railIndex is the playlist index of a rail row target ("rail:3").
-func railIndex(target string) (int, bool) {
-	rest, ok := strings.CutPrefix(target, idRail+":")
+// rowIndex is the row index of a list row target ("rail:3" in "rail").
+func rowIndex(list, target string) (int, bool) {
+	rest, ok := strings.CutPrefix(target, list+":")
 	if !ok {
 		return 0, false
 	}

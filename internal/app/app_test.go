@@ -16,12 +16,16 @@ import (
 	"github.com/lunguini/smolify/internal/player"
 )
 
-// fake is a Backend that records requests.
+// fake is a Backend that records requests: the ones that change things in
+// calls, track listings and liked lookups in reads.
 type fake struct {
 	calls     []string
+	reads     []string
 	playlists []player.Playlist
 	status    player.Status
 	fail      error
+	listings  map[string]player.Listing
+	liked     map[string]bool
 }
 
 func (f *fake) Events() <-chan player.Event { return nil }
@@ -49,6 +53,26 @@ func (f *fake) SetVolume(_ context.Context, v int) error {
 func (f *fake) SetShuffle(_ context.Context, on bool) error { return f.record("shuffle " + bstr(on)) }
 func (f *fake) SetRepeat(_ context.Context, on bool) error  { return f.record("repeat " + bstr(on)) }
 
+func (f *fake) ContextTracks(_ context.Context, uri string) (player.Listing, error) {
+	f.reads = append(f.reads, "tracks "+uri)
+	if l, ok := f.listings[uri]; ok {
+		return l, f.fail
+	}
+	return player.Listing{URI: uri, Ready: true}, f.fail
+}
+func (f *fake) Queue(_ context.Context, uri string) error { return f.record("queue " + uri) }
+func (f *fake) SetLiked(_ context.Context, uris []string, on bool) error {
+	return f.record("like " + strings.Join(uris, ",") + " " + bstr(on))
+}
+func (f *fake) Liked(_ context.Context, uris []string) ([]bool, error) {
+	f.reads = append(f.reads, "liked "+strings.Join(uris, ","))
+	out := make([]bool, len(uris))
+	for i, u := range uris {
+		out[i] = f.liked[u]
+	}
+	return out, f.fail
+}
+
 func bstr(b bool) string {
 	if b {
 		return "on"
@@ -71,7 +95,7 @@ var library = []player.Playlist{
 
 func start(t *testing.T) (*flatest.Driver[State], *fake, *covers) {
 	t.Helper()
-	f := &fake{playlists: library, status: player.Status{Volume: 40, VolumeSteps: 100, Paused: true}}
+	f := &fake{playlists: library, status: player.Status{Volume: 40, VolumeSteps: 100, Paused: true}, listings: map[string]player.Listing{"spotify:playlist:a": bassHouse}}
 	c := &covers{}
 	d := flatest.Start(New(f, c, nil), 100)
 	d.Send(flatte.ResizeEvent{Width: 100, Height: 30})
@@ -147,7 +171,14 @@ func TestBrowseAndPlay(t *testing.T) {
 	}
 }
 
-var song = player.Track{URI: "spotify:track:1", Name: "Overthink", Artists: []string{"Kuo", "Lin"}, Duration: 200 * time.Second, Position: 10 * time.Second, ContextURI: "spotify:playlist:a", Cover: "https://img/t"}
+// bassHouse is playlist a's listing: song, and two more.
+var bassHouse = player.Listing{URI: "spotify:playlist:a", Ready: true, Length: 3, Cached: 3, Tracks: []player.Track{
+	song,
+	{URI: "spotify:track:2", Name: "Gravity", Artists: []string{"Dua"}, Album: "Fall", Duration: 185 * time.Second},
+	{URI: "spotify:episode:3", Name: "Talk", Artists: []string{"Host"}, Album: "Show", Duration: 61 * time.Minute},
+}}
+
+var song = player.Track{URI: "spotify:track:1", Name: "Overthink", Artists: []string{"Kuo", "Lin"}, Album: "Thinking", Duration: 200 * time.Second, Position: 10 * time.Second, ContextURI: "spotify:playlist:a", Cover: "https://img/t"}
 
 func TestNowPlaying(t *testing.T) {
 	d, f := ready(t)
@@ -248,10 +279,35 @@ func TestWheelNudgesSliders(t *testing.T) {
 	if d.State().position != at || d.State().volume != vol+volumeStep {
 		t.Fatalf("position %v, volume %d", d.State().position, d.State().volume)
 	}
-	cursor := d.State().rail.Cursor()
-	wheel(idRail, flatte.MouseWheelDown)
-	if d.State().rail.Cursor() != cursor+1 {
-		t.Fatalf("wheel over the library: cursor %d", d.State().rail.Cursor())
+}
+
+func TestWheelScrollsTheListNotTheSelection(t *testing.T) {
+	d, f, _ := start(t)
+	long := player.Listing{URI: "spotify:playlist:a", Ready: true}
+	for i := range 40 {
+		long.Tracks = append(long.Tracks, player.Track{URI: "spotify:track:" + strconv.Itoa(i), Name: "Song " + strconv.Itoa(i), Duration: time.Minute})
+	}
+	long.Length, long.Cached = 40, 40
+	f.listings[long.URI] = long
+	event(d, player.Ready{})
+	d.Send(flatte.MenuEvent{ID: "none", Target: idTracks + ":1"}) // select row 1
+	_, comp := flatte.ComposeFrame(d.Frame(), 100, 30)
+	r := comp.Rects[idTracks+":5"]
+	for range 3 {
+		d.Send(flatte.MouseEvent{X: r.X + 2, Y: r.Y, Button: flatte.MouseWheelDown, Action: flatte.MousePress})
+	}
+	fr := d.Settle()
+	s := d.State()
+	if s.tracks.Offset() != 3 || s.tracks.Cursor() != 1 {
+		t.Fatalf("offset %d cursor %d, want 3 and 1", s.tracks.Offset(), s.tracks.Cursor())
+	}
+	if strings.Contains(plain(fr), "Song 2 ") || !strings.Contains(plain(fr), "Song 3") {
+		t.Fatalf("not scrolled:\n%s", plain(fr))
+	}
+	// The next arrow brings the selection back.
+	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
+	if s.tracks.Cursor() != 2 || s.tracks.Offset() != 2 {
+		t.Fatalf("offset %d cursor %d after ↓", s.tracks.Offset(), s.tracks.Cursor())
 	}
 }
 
@@ -312,5 +368,208 @@ func TestClock(t *testing.T) {
 		if got := clock(d); got != want {
 			t.Errorf("clock(%v) = %q, want %q", d, got, want)
 		}
+	}
+}
+
+func TestTrackTablePlaysFromATrack(t *testing.T) {
+	d, f := ready(t)
+	fr := d.Frame()
+	for _, want := range []string{"#  ", "Title", "Album", "Time", "Overthink  Kuo, Lin", "Thinking", "3:20", "Gravity  Dua", "61:00"} {
+		if !strings.Contains(plain(fr), want) {
+			t.Errorf("table missing %q:\n%s", want, plain(fr))
+		}
+	}
+	if len(f.reads) == 0 || f.reads[0] != "tracks spotify:playlist:a" {
+		t.Fatalf("reads %v", f.reads)
+	}
+	// Only songs are asked about Liked Songs; the episode is not.
+	if !strings.Contains(strings.Join(f.reads, ","), "liked spotify:track:1,spotify:track:2") || strings.Contains(strings.Join(f.reads, ","), "episode") {
+		t.Fatalf("liked reads %v", f.reads)
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
+	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
+	d.Settle()
+	if len(f.calls) != 1 || f.calls[0] != "play spotify:playlist:a spotify:track:2" {
+		t.Fatalf("calls %v", f.calls)
+	}
+	if d.State().rail.Cursor() != 0 {
+		t.Fatal("the arrows moved the library while the tracks had focus")
+	}
+	// Tab goes back to the library, where the arrows move the selection.
+	d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
+	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
+	if d.State().rail.Cursor() != 1 || d.State().tracks.Cursor() != 0 {
+		t.Fatalf("rail %d tracks %d", d.State().rail.Cursor(), d.State().tracks.Cursor())
+	}
+}
+
+func TestTrackClicksSelectThenPlay(t *testing.T) {
+	d, f := ready(t)
+	_, comp := flatte.ComposeFrame(d.Frame(), 100, 30)
+	r, ok := comp.Rects[idTracks+":1"]
+	if !ok {
+		t.Fatalf("no row 1 in %v", comp.Rects)
+	}
+	click := func() {
+		d.Send(flatte.MouseEvent{X: r.X + 2, Y: r.Y, Button: flatte.MouseLeft, Action: flatte.MousePress})
+		d.Settle()
+	}
+	click()
+	if d.State().tracks.Cursor() != 1 || d.State().focus != paneTracks || len(f.calls) != 0 {
+		t.Fatalf("first click: cursor %d focus %v calls %v", d.State().tracks.Cursor(), d.State().focus, f.calls)
+	}
+	click()
+	if len(f.calls) != 1 || f.calls[0] != "play spotify:playlist:a spotify:track:2" {
+		t.Fatalf("second click: %v", f.calls)
+	}
+}
+
+func TestPartialListingIsAskedAgain(t *testing.T) {
+	d, f, _ := start(t)
+	partial := player.Listing{URI: "spotify:playlist:a", Length: 3, Cached: 0}
+	f.listings["spotify:playlist:a"] = partial
+	event(d, player.Ready{})
+	if !strings.Contains(plain(d.Frame()), "Listing the tracks…") {
+		t.Fatalf("partial:\n%s", plain(d.Frame()))
+	}
+	// Ready, but metadata still coming: rows show as placeholders.
+	f.listings["spotify:playlist:a"] = player.Listing{URI: partial.URI, Ready: true, Length: 3, Cached: 1, Tracks: []player.Track{song, {URI: "spotify:track:2"}, {URI: "spotify:episode:3"}}}
+	d.Advance(time.Second)
+	if fr := plain(d.Frame()); !strings.Contains(fr, "Overthink") || !strings.Contains(fr, "2    …") {
+		t.Fatalf("placeholders:\n%s", fr)
+	}
+	f.listings["spotify:playlist:a"] = bassHouse
+	d.Advance(time.Second)
+	n := strings.Count(strings.Join(f.reads, ","), "tracks spotify:playlist:a")
+	d.Advance(3 * time.Second)
+	if strings.Count(strings.Join(f.reads, ","), "tracks spotify:playlist:a") != n || !strings.Contains(plain(d.Frame()), "Gravity") {
+		t.Fatalf("a complete listing was asked again: %v", f.reads)
+	}
+}
+
+func TestTrackContextMenu(t *testing.T) {
+	d, f := ready(t)
+	items := ContextMenu(d.State(), idTracks+":1")
+	if len(items) != 4 || items[0].ID != cmdPlayTrack || items[1].ID != cmdQueue || items[3].Label != "Save to Liked Songs" || items[3].Disabled {
+		t.Fatalf("menu %+v", items)
+	}
+	if ep := ContextMenu(d.State(), idTracks+":2"); !ep[3].Disabled {
+		t.Fatal("an episode can be liked")
+	}
+	if ContextMenu(d.State(), idTracks+":9") != nil {
+		t.Fatal("a menu for no row")
+	}
+	d.Send(flatte.MenuEvent{ID: cmdQueue, Target: idTracks + ":1"})
+	fr := d.Settle()
+	if len(f.calls) != 1 || f.calls[0] != "queue spotify:track:2" || !strings.Contains(plain(fr), "Added “Gravity” to the queue.") {
+		t.Fatalf("queue: %v\n%s", f.calls, plain(fr))
+	}
+	d.Send(flatte.MenuEvent{ID: cmdLikeTrack, Target: idTracks + ":1"})
+	d.Settle()
+	if f.calls[1] != "like spotify:track:2 on" || !d.State().liked["spotify:track:2"] {
+		t.Fatalf("like: %v", f.calls)
+	}
+	if ContextMenu(d.State(), idTracks+":1")[3].Label != "Remove from Liked Songs" {
+		t.Fatal("menu does not follow liked")
+	}
+	if !strings.Contains(plain(d.Frame()), "♥") {
+		t.Fatalf("no heart:\n%s", plain(d.Frame()))
+	}
+}
+
+func TestLikeThePlayingTrack(t *testing.T) {
+	d, f := ready(t)
+	event(d, song)
+	m := Menus(d.State())[0].Items
+	like := m[len(m)-1]
+	if like.ID != cmdLike || like.Disabled || like.Label != "Save to Liked Songs" {
+		t.Fatalf("like item %+v", like)
+	}
+	if !strings.Contains(plain(d.Frame()), "Overthink ♡") {
+		t.Fatalf("no outline heart:\n%s", plain(d.Frame()))
+	}
+	// A failed request puts the heart back and says why.
+	f.fail = errors.New("offline")
+	d.Send(flatte.MenuEvent{ID: cmdLike})
+	if !d.State().liked[song.URI] {
+		t.Fatal("not shown at once")
+	}
+	fr := d.Settle()
+	if d.State().liked[song.URI] || !strings.Contains(plain(fr), "Could not update Liked Songs: offline") {
+		t.Fatalf("after failure: liked %v\n%s", d.State().liked[song.URI], plain(fr))
+	}
+	// The heart is the control too.
+	f.fail = nil
+	_, comp := flatte.ComposeFrame(d.Frame(), 100, 30)
+	r := comp.Rects[idLike]
+	d.Send(flatte.MouseEvent{X: r.X, Y: r.Y, Button: flatte.MouseLeft, Action: flatte.MousePress})
+	d.Settle()
+	if !d.State().liked[song.URI] || f.calls[len(f.calls)-1] != "like spotify:track:1 on" || !strings.Contains(plain(d.Frame()), "Overthink ♥") {
+		t.Fatalf("heart click: %v", f.calls)
+	}
+}
+
+func TestLikedSongsInTheLibrary(t *testing.T) {
+	d, f, _ := start(t)
+	f.status.Username = "adrian"
+	liked := player.LikedSongs("adrian")
+	f.listings[liked] = player.Listing{URI: liked, Ready: true, Length: 1, Cached: 1, Tracks: []player.Track{song}}
+	f.liked = map[string]bool{song.URI: true}
+	event(d, player.Ready{})
+	s := d.State()
+	lib := s.library()
+	if len(lib) != 3 || lib[0].URI != "spotify:user:adrian:collection" || lib[0].Name != "Liked Songs" {
+		t.Fatalf("library %+v", lib)
+	}
+	// The list shown before the account was known stays selected.
+	if pl, _ := s.selected(); pl.URI != "spotify:playlist:a" || s.rail.Cursor() != 1 {
+		t.Fatalf("selected %+v at %d", pl, s.rail.Cursor())
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyUp})
+	fr := d.Settle()
+	if !strings.Contains(plain(fr), "Liked Songs") || !strings.Contains(plain(fr), "adrian · 1 song") || !strings.Contains(plain(fr), "♥") {
+		t.Fatalf("liked songs:\n%s", plain(fr))
+	}
+	// Unliking from Liked Songs lists it again.
+	f.listings[liked] = player.Listing{URI: liked, Ready: true}
+	d.Send(flatte.MenuEvent{ID: cmdLikeTrack, Target: idTracks + ":0"})
+	fr = d.Settle()
+	if !strings.Contains(plain(fr), "No tracks here yet.") {
+		t.Fatalf("after unlike:\n%s", plain(fr))
+	}
+}
+
+func TestScrollBarDragScrollsTheList(t *testing.T) {
+	d, f, _ := start(t)
+	long := player.Listing{URI: "spotify:playlist:a", Ready: true, Length: 100, Cached: 100}
+	for i := range 100 {
+		long.Tracks = append(long.Tracks, player.Track{URI: "spotify:track:" + strconv.Itoa(i), Name: "Song " + strconv.Itoa(i), Duration: time.Minute})
+	}
+	f.listings[long.URI] = long
+	event(d, player.Ready{})
+	fr := d.Frame()
+	if !strings.Contains(plain(fr), "█") {
+		t.Fatalf("no thumb on a long list:\n%s", plain(fr))
+	}
+	_, comp := flatte.ComposeFrame(fr, 100, 30)
+	bar := comp.Rects[idTrackBar]
+	if bar.H < 5 {
+		t.Fatalf("bar %+v", bar)
+	}
+	d.Send(flatte.MouseEvent{X: bar.X, Y: bar.Y, Button: flatte.MouseLeft, Action: flatte.MousePress, Target: idTrackBar, TargetRect: bar})
+	d.Send(flatte.MouseEvent{X: bar.X, Y: bar.Y + bar.H - 1, Button: flatte.MouseLeft, Action: flatte.MouseMotion})
+	s := d.State()
+	if s.tracks.Offset() != 100-s.tracks.Height() || s.tracks.Cursor() != 0 {
+		t.Fatalf("dragged to the bottom: offset %d cursor %d (height %d)", s.tracks.Offset(), s.tracks.Cursor(), s.tracks.Height())
+	}
+	d.Send(flatte.MouseEvent{X: bar.X, Y: bar.Y, Button: flatte.MouseLeft, Action: flatte.MouseRelease})
+	if s.drag != "" {
+		t.Fatal("drag not ended")
+	}
+	// The library's list fits: its bar is blank and pressing it is harmless.
+	d.Send(flatte.MouseEvent{Button: flatte.MouseLeft, Action: flatte.MousePress, Target: idRailBar, TargetRect: comp.Rects[idRailBar]})
+	if s.rail.Offset() != 0 {
+		t.Fatalf("rail offset %d", s.rail.Offset())
 	}
 }

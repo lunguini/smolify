@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os/exec"
+	"strings"
 
 	"github.com/lunguini/flatte"
 )
@@ -18,6 +19,8 @@ func char(r rune, mod flatte.Mod) flatte.KeyEvent {
 func Menus(s *State) []flatte.Menu {
 	_, hasPlaylist := s.selected()
 	noTrack := s.track == nil
+	song := !noTrack && strings.HasPrefix(s.track.URI, "spotify:track:")
+	liked := !noTrack && s.liked[s.track.URI]
 	return []flatte.Menu{{Title: "Playback", Items: []flatte.MenuItem{
 		{ID: cmdPlayPause, Label: playLabel(s), Keys: []flatte.KeyEvent{char(' ', 0)}, Disabled: noTrack && !hasPlaylist},
 		{ID: cmdNext, Label: "Next", Keys: []flatte.KeyEvent{key(flatte.KeyRight, flatte.ModSuper), key(flatte.KeyRight, flatte.ModCtrl), char('n', 0)}, Disabled: noTrack},
@@ -31,6 +34,8 @@ func Menus(s *State) []flatte.Menu {
 		{Separator: true},
 		{ID: cmdShuffle, Label: "Shuffle", Checked: s.shuffle, Keys: []flatte.KeyEvent{char('s', 0)}},
 		{ID: cmdRepeat, Label: "Repeat", Checked: s.repeat.Context, Keys: []flatte.KeyEvent{char('r', 0)}},
+		{Separator: true},
+		{ID: cmdLike, Label: likeLabel(liked), Keys: []flatte.KeyEvent{char('l', 0)}, Disabled: !song},
 	}}}
 }
 
@@ -41,13 +46,36 @@ func playLabel(s *State) string {
 	return "Play"
 }
 
-// ContextMenu is the menu for a playlist in the library.
+// ContextMenu is the menu for a list in the library or a track in the
+// table.
 func ContextMenu(s *State, target string) []flatte.MenuItem {
-	i, ok := railIndex(target)
-	if !ok || i >= len(s.playlists) {
+	if i, ok := rowIndex(idRail, target); ok {
+		lib := s.library()
+		if i >= len(lib) {
+			return nil
+		}
+		return []flatte.MenuItem{{ID: cmdPlayList, Label: "Play “" + lib[i].Name + "”"}}
+	}
+	i, ok := rowIndex(idTracks, target)
+	l := s.listings[s.shown]
+	if !ok || i >= len(l.Tracks) {
 		return nil
 	}
-	return []flatte.MenuItem{{ID: cmdPlayList, Label: "Play “" + s.playlists[i].Name + "”"}}
+	t := l.Tracks[i]
+	song := strings.HasPrefix(t.URI, "spotify:track:")
+	return []flatte.MenuItem{
+		{ID: cmdPlayTrack, Label: "Play"},
+		{ID: cmdQueue, Label: "Add to Queue"},
+		{Separator: true},
+		{ID: cmdLikeTrack, Label: likeLabel(s.liked[t.URI]), Disabled: !song},
+	}
+}
+
+func likeLabel(liked bool) string {
+	if liked {
+		return "Remove from Liked Songs"
+	}
+	return "Save to Liked Songs"
 }
 
 // openURL opens url in the default browser.

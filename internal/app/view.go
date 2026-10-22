@@ -10,6 +10,8 @@ import (
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui/layout"
+
+	"github.com/lunguini/smolify/internal/player"
 )
 
 var (
@@ -92,7 +94,7 @@ func spaced(code string) string { return strings.Join(strings.Split(code, ""), "
 // playing one with a note.
 func railView(s *State) layout.Node {
 	rows := s.rail.Rows(idRail, func(i int, selected bool) layout.Node {
-		pl := s.playlists[i]
+		pl := s.library()[i]
 		st := layout.TextStyle{}
 		if selected {
 			st = layout.TextStyle{Bold: true}
@@ -104,17 +106,17 @@ func railView(s *State) layout.Node {
 		}
 		return layout.Row{Children: []layout.Node{mark, layout.Label{Text: pl.Name, Style: st}}}
 	})
-	rows.ID, rows.H = idRail, layout.Grow(1)
+	rows.ID, rows.W, rows.H = idRail, layout.Grow(1), layout.Grow(1)
 	title := "Your Library"
-	if len(s.playlists) > 0 {
-		title += "  " + strconv.Itoa(len(s.playlists))
+	if n := len(s.library()); n > 0 {
+		title += "  " + strconv.Itoa(n)
 	}
 	return layout.Col{
 		NodeBase: layout.NodeBase{W: layout.Fixed(railWidth), PadLeft: 1, PadRight: 1, PadTop: 1, Box: layout.Box{Background: lipgloss.Color("#121212")}},
 		Children: []layout.Node{
 			layout.Label{Text: title, Style: layout.TextStyle{Bold: true, Size: 15}},
 			layout.Label{},
-			rows,
+			layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{rows, listBar(s.rail, idRailBar)}},
 		},
 	}
 }
@@ -138,7 +140,12 @@ func centerView(s *State) layout.Node {
 	if pl.Description != "" {
 		info = append(info, layout.Label{Text: pl.Description, Wrap: true, Style: subtle})
 	}
-	meta := plural(pl.Length, "song")
+	l, listed := s.listings[pl.URI]
+	n := pl.Length
+	if listed && l.Ready {
+		n = l.Length
+	}
+	meta := plural(n, "song")
 	if pl.Owner != "" {
 		meta = pl.Owner + " · " + meta
 	}
@@ -149,15 +156,94 @@ func centerView(s *State) layout.Node {
 			layout.Button{NodeBase: layout.NodeBase{ID: idPlayList, Tooltip: "Play this playlist"}, Label: "▶ Play", Default: true},
 		}},
 	)
-	if s.status != "" {
+	switch {
+	case s.status != "":
 		info = append(info, layout.Label{}, layout.Label{Text: s.status, Wrap: true, Style: layout.TextStyle{Fg: lipgloss.Color("#f15e6c")}})
+	case s.notice != "":
+		info = append(info, layout.Label{}, layout.Label{Text: s.notice, Wrap: true, Style: subtle})
 	}
-	return layout.Col{NodeBase: layout.NodeBase{Pad: 2, W: layout.Grow(1)}, Children: []layout.Node{
+	return layout.Col{NodeBase: layout.NodeBase{PadLeft: 2, PadRight: 2, PadTop: 2, W: layout.Grow(1)}, Children: []layout.Node{
 		layout.Row{NodeBase: layout.NodeBase{Gap: 3}, Children: []layout.Node{
 			cover(s, pl.Image, 128),
 			layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: info},
 		}},
+		layout.Label{},
+		trackTable(s, l, listed),
 	}}
+}
+
+// trackTable is the selected list's tracks: number, title and artists,
+// album, liked, and duration.
+func trackTable(s *State, l player.Listing, listed bool) layout.Node {
+	switch {
+	case !listed || !l.Ready && len(l.Tracks) == 0:
+		return layout.Label{Text: "Listing the tracks…", Style: subtle}
+	case l.Length == 0:
+		return layout.Label{Text: "No tracks here yet.", Style: subtle}
+	}
+	header := trackCells(layout.Label{Text: "#", Style: subtle}, layout.Label{Text: "Title", Style: subtle},
+		layout.Label{Text: "Album", Style: subtle}, layout.Icon{}, layout.Label{Text: "Time", Style: subtle})
+	header.PadBottom = 1
+	rows := s.tracks.Rows(idTracks, func(i int, _ bool) layout.Node {
+		if i >= len(l.Tracks) {
+			return layout.Label{}
+		}
+		return trackRow(s, i, l.Tracks[i])
+	})
+	rows.ID, rows.W, rows.H = idTracks, layout.Grow(1), layout.Grow(1)
+	return layout.Col{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{
+		header,
+		layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{rows, listBar(s.tracks, idTrackBar)}},
+	}}
+}
+
+// trackCells lays out one row of the table.
+func trackCells(num, title, album, liked, dur layout.Node) layout.Row {
+	return layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: 2}, Children: []layout.Node{
+		layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(3)}, Children: []layout.Node{num}},
+		layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(3)}, Children: []layout.Node{title}},
+		layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(2)}, Children: []layout.Node{album}},
+		layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(2)}, Children: []layout.Node{liked}},
+		layout.Row{NodeBase: layout.NodeBase{W: layout.Fixed(5)}, Children: []layout.Node{layout.NewSpacer(), dur}},
+	}}
+}
+
+// trackRow is track t at index i; the playing one in the accent with a
+// note for its number.
+func trackRow(s *State, i int, t player.Track) layout.Node {
+	if t.Name == "" {
+		return trackCells(layout.Label{Text: strconv.Itoa(i + 1), Style: subtle}, layout.Label{Text: "…", Style: subtle},
+			layout.Label{}, layout.Icon{}, layout.Label{})
+	}
+	num := layout.Label{Text: strconv.Itoa(i + 1), Style: subtle}
+	name := layout.TextStyle{}
+	if s.track != nil && s.track.URI == t.URI && s.context == s.shown {
+		num = layout.Label{Text: "♪", Style: layout.TextStyle{Fg: accent}}
+		name.Fg = accent
+	}
+	title := layout.Label{Runs: []layout.Run{
+		{Text: t.Name, Style: name},
+		{Text: "  " + strings.Join(t.Artists, ", "), Style: subtle},
+	}}
+	return trackCells(num, title, layout.Label{Text: t.Album, Style: subtle}, heart(s.liked[t.URI], ""), layout.Label{Text: clock(t.Duration), Style: subtle})
+}
+
+// heart marks a liked track. With an id it is the like control, an outline
+// when not liked.
+func heart(liked bool, id string) layout.Node {
+	tip := "Save to Liked Songs (l)"
+	if liked {
+		tip = "Remove from Liked Songs (l)"
+	}
+	switch {
+	case id == "" && liked:
+		return layout.Icon{Text: "♥", Style: layout.TextStyle{Fg: accent}}
+	case id == "":
+		return layout.Icon{Text: " "}
+	case liked:
+		return layout.Icon{NodeBase: layout.NodeBase{ID: id, Tooltip: tip}, Text: "♥", Style: layout.TextStyle{Fg: accent}}
+	}
+	return layout.Icon{NodeBase: layout.NodeBase{ID: id, Tooltip: tip}, Text: "♡", Style: subtle}
 }
 
 // cover is the image at url, size points square — in a terminal (which
@@ -214,6 +300,9 @@ func playerBar(s *State) layout.Node {
 			layout.Label{Text: artists, Style: subtle},
 		}},
 	}}
+	if t := s.track; t != nil && strings.HasPrefix(t.URI, "spotify:track:") {
+		now.Children = append(now.Children, layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(2)}, Children: []layout.Node{heart(s.liked[t.URI], idLike)}})
+	}
 
 	play := "▶"
 	if s.playing {

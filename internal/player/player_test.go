@@ -95,3 +95,26 @@ func TestFileStoreAndSignOut(t *testing.T) {
 		t.Fatalf("after sign out %+v", back)
 	}
 }
+
+func TestListingOf(t *testing.T) {
+	cover := "https://img/1"
+	l := listingOf(&daemon.ApiContextTracks{Uri: "spotify:playlist:a", Ready: true, Length: 2, Cached: 1, Tracks: []daemon.ApiContextTrackItem{
+		{Uri: "spotify:track:1", Track: &daemon.ApiTrack{Uri: "spotify:track:1", Name: "One", ArtistNames: []string{"A"}, AlbumName: "Al", AlbumCoverUrl: &cover, Duration: 1500}},
+		{Uri: "spotify:track:2"},
+	}})
+	if l.URI != "spotify:playlist:a" || !l.Ready || l.Length != 2 || l.Cached != 1 || len(l.Tracks) != 2 || l.Complete() {
+		t.Fatalf("listing %+v", l)
+	}
+	if one := l.Tracks[0]; one.Name != "One" || one.Album != "Al" || one.Cover != cover || one.Duration != 1500*time.Millisecond {
+		t.Fatalf("track %+v", one)
+	}
+	if two := l.Tracks[1]; two.URI != "spotify:track:2" || two.Name != "" {
+		t.Fatalf("unresolved %+v", two)
+	}
+	if !(Listing{Ready: true, Length: 2, Cached: 2}).Complete() || (Listing{Length: 0}).Complete() {
+		t.Fatal("Complete")
+	}
+	if LikedSongs("adrian") != "spotify:user:adrian:collection" {
+		t.Fatal(LikedSongs("adrian"))
+	}
+}

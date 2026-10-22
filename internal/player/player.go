@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/devgianlu/go-librespot/daemon"
@@ -185,6 +186,86 @@ func (p *Player) Playlists(ctx context.Context) ([]Playlist, error) {
 		}
 	}
 }
+
+// Listing is a context's tracks as far as the player has resolved them:
+// Tracks has Length entries once Ready, and an entry not yet resolved has
+// only its URI. Ask again while !Complete.
+type Listing struct {
+	URI    string
+	Ready  bool
+	Length int
+	Cached int
+	Tracks []Track
+}
+
+// Complete reports that every track is listed with its metadata.
+func (l Listing) Complete() bool { return l.Ready && l.Cached >= l.Length }
+
+// ContextTracks lists the tracks of a playlist, album, or Liked Songs. The
+// player enumerates in the background, so a first answer is often partial.
+func (p *Player) ContextTracks(ctx context.Context, uri string) (Listing, error) {
+	v, err := p.request(ctx, daemon.ApiRequestTypeContextTracks, daemon.ApiRequestDataContextTracks{Uri: uri})
+	if err != nil {
+		return Listing{}, err
+	}
+	r, ok := v.(*daemon.ApiContextTracks)
+	if !ok {
+		return Listing{}, fmt.Errorf("player: unexpected tracks %T", v)
+	}
+	return listingOf(r), nil
+}
+
+func listingOf(r *daemon.ApiContextTracks) Listing {
+	l := Listing{URI: r.Uri, Ready: r.Ready, Length: r.Length, Cached: r.Cached, Tracks: make([]Track, len(r.Tracks))}
+	for i, it := range r.Tracks {
+		if it.Track != nil {
+			l.Tracks[i] = trackOf(*it.Track)
+		}
+		l.Tracks[i].URI = it.Uri
+	}
+	return l
+}
+
+// Queue adds the track uri to the queue.
+func (p *Player) Queue(ctx context.Context, uri string) error {
+	_, err := p.request(ctx, daemon.ApiRequestTypeAddToQueue, uri)
+	return err
+}
+
+// maxLiked is how many tracks one liked request may name.
+const maxLiked = 50
+
+// SetLiked adds the tracks to Liked Songs, or removes them.
+func (p *Player) SetLiked(ctx context.Context, uris []string, liked bool) error {
+	for chunk := range slices.Chunk(uris, maxLiked) {
+		if _, err := p.request(ctx, daemon.ApiRequestTypeSetLiked, daemon.ApiSetLiked{Uris: chunk, Liked: liked}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Liked tells for each of uris whether it is in Liked Songs.
+func (p *Player) Liked(ctx context.Context, uris []string) ([]bool, error) {
+	out := make([]bool, 0, len(uris))
+	for chunk := range slices.Chunk(uris, maxLiked) {
+		v, err := p.request(ctx, daemon.ApiRequestTypeGetLiked, chunk)
+		if err != nil {
+			return nil, err
+		}
+		r, ok := v.(*daemon.ApiLikedStates)
+		if !ok || len(r.Items) != len(chunk) {
+			return nil, fmt.Errorf("player: unexpected liked states %T", v)
+		}
+		for _, it := range r.Items {
+			out = append(out, it.Liked)
+		}
+	}
+	return out, nil
+}
+
+// LikedSongs is the context URI of the user's Liked Songs.
+func LikedSongs(username string) string { return "spotify:user:" + username + ":collection" }
 
 // Play plays the context uri (a playlist, album, or track), starting at the
 // track skipTo when set.
