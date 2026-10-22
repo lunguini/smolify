@@ -3,13 +3,14 @@ module github.com/lunguini/smolify
 go 1.26.1
 
 require (
+	charm.land/lipgloss/v2 v2.0.5
 	github.com/devgianlu/go-librespot v0.10.5
 	github.com/lunguini/flatte v0.1.2-0.20261021203128-cba0f91f058f
 	github.com/lunguini/flatte/window v0.0.0-20261021203128-cba0f91f058f
+	github.com/sirupsen/logrus v1.9.3
 )
 
 require (
-	charm.land/lipgloss/v2 v2.0.5 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -38,7 +39,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/cors v1.11.1 // indirect
-	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/xlab/vorbis-go v0.0.0-20210911202351-b5b85f1ec645 // indirect

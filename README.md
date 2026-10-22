@@ -10,7 +10,9 @@ Work in progress. Requires Spotify Premium. Not affiliated with Spotify.
 
 ```bash
 brew install libogg libvorbis flac mpg123   # audio codecs (cgo)
-go run ./cmd/spike-player                   # current spike: pair, list, play
+go run ./cmd/smolify                        # in the terminal
+go run ./cmd/smolify -gui                   # in a window (macOS)
+go run ./cmd/smolify -sign-out              # forget the Spotify sign-in
 ```
 
 ## License
