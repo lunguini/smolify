@@ -107,6 +107,10 @@ func (p *Player) Close() {
 	}
 }
 
+// ErrSuperseded reports a command a newer one replaced before it ran: the
+// newer one's result is what counts.
+var ErrSuperseded = daemon.ErrSuperseded
+
 // request sends one request and waits for its reply.
 func (p *Player) request(ctx context.Context, t daemon.ApiRequestType, data any) (any, error) {
 	req, wait := daemon.NewApiRequest(t, data)
@@ -185,6 +189,20 @@ func (p *Player) Playlists(ctx context.Context) ([]Playlist, error) {
 			return out, nil
 		}
 	}
+}
+
+// Token is an access token for Spotify's Web API, signed in as the player
+// is. The player refreshes it on every ask; callers cache it.
+func (p *Player) Token(ctx context.Context) (string, error) {
+	v, err := p.request(ctx, daemon.ApiRequestTypeToken, nil)
+	if err != nil {
+		return "", err
+	}
+	t, ok := v.(*daemon.ApiToken)
+	if !ok || t.Token == "" {
+		return "", fmt.Errorf("player: unexpected token %T", v)
+	}
+	return t.Token, nil
 }
 
 // Listing is a context's tracks as far as the player has resolved them:

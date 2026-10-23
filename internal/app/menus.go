@@ -15,28 +15,47 @@ func char(r rune, mod flatte.Mod) flatte.KeyEvent {
 }
 
 // Menus is the menu bar; its shortcuts are Smolify's playback keys, in every
-// host (plain keys for a terminal, ⌘ chords too in a window).
+// host (plain keys for a terminal, ⌘ chords too in a window). While the
+// search field has focus, plain keys type: only chords stay shortcuts.
 func Menus(s *State) []flatte.Menu {
 	_, hasPlaylist := s.selected()
 	noTrack := s.track == nil
 	song := !noTrack && strings.HasPrefix(s.track.URI, "spotify:track:")
 	liked := !noTrack && s.liked[s.track.URI]
-	return []flatte.Menu{{Title: "Playback", Items: []flatte.MenuItem{
-		{ID: cmdPlayPause, Label: playLabel(s), Keys: []flatte.KeyEvent{char(' ', 0)}, Disabled: noTrack && !hasPlaylist},
-		{ID: cmdNext, Label: "Next", Keys: []flatte.KeyEvent{key(flatte.KeyRight, flatte.ModSuper), key(flatte.KeyRight, flatte.ModCtrl), char('n', 0)}, Disabled: noTrack},
-		{ID: cmdPrev, Label: "Previous", Keys: []flatte.KeyEvent{key(flatte.KeyLeft, flatte.ModSuper), key(flatte.KeyLeft, flatte.ModCtrl), char('p', 0)}, Disabled: noTrack},
-		{Separator: true},
-		{ID: cmdSeekAhead, Label: "Seek Forward", Keys: []flatte.KeyEvent{key(flatte.KeyRight, 0)}, Disabled: noTrack},
-		{ID: cmdSeekBack, Label: "Seek Backward", Keys: []flatte.KeyEvent{key(flatte.KeyLeft, 0)}, Disabled: noTrack},
-		{Separator: true},
-		{ID: cmdVolumeUp, Label: "Volume Up", Keys: []flatte.KeyEvent{key(flatte.KeyUp, flatte.ModSuper), char('+', 0), char('=', 0)}},
-		{ID: cmdVolumeDown, Label: "Volume Down", Keys: []flatte.KeyEvent{key(flatte.KeyDown, flatte.ModSuper), char('-', 0)}},
-		{Separator: true},
-		{ID: cmdShuffle, Label: "Shuffle", Checked: s.shuffle, Keys: []flatte.KeyEvent{char('s', 0)}},
-		{ID: cmdRepeat, Label: "Repeat", Checked: s.repeat.Context, Keys: []flatte.KeyEvent{char('r', 0)}},
-		{Separator: true},
-		{ID: cmdLike, Label: likeLabel(liked), Keys: []flatte.KeyEvent{char('l', 0)}, Disabled: !song},
-	}}}
+	keys := func(ks ...flatte.KeyEvent) []flatte.KeyEvent {
+		if s.focus != paneSearch {
+			return ks
+		}
+		var chords []flatte.KeyEvent
+		for _, k := range ks {
+			if k.Mod&(flatte.ModCtrl|flatte.ModSuper|flatte.ModAlt) != 0 {
+				chords = append(chords, k)
+			}
+		}
+		return chords
+	}
+	return []flatte.Menu{
+		{Title: "Playback", Items: []flatte.MenuItem{
+			{ID: cmdPlayPause, Label: playLabel(s), Keys: keys(char(' ', 0)), Disabled: noTrack && !hasPlaylist},
+			{ID: cmdNext, Label: "Next", Keys: keys(key(flatte.KeyRight, flatte.ModSuper), key(flatte.KeyRight, flatte.ModCtrl), char('n', 0)), Disabled: noTrack},
+			{ID: cmdPrev, Label: "Previous", Keys: keys(key(flatte.KeyLeft, flatte.ModSuper), key(flatte.KeyLeft, flatte.ModCtrl), char('p', 0)), Disabled: noTrack},
+			{Separator: true},
+			{ID: cmdSeekAhead, Label: "Seek Forward", Keys: keys(key(flatte.KeyRight, 0)), Disabled: noTrack},
+			{ID: cmdSeekBack, Label: "Seek Backward", Keys: keys(key(flatte.KeyLeft, 0)), Disabled: noTrack},
+			{Separator: true},
+			{ID: cmdVolumeUp, Label: "Volume Up", Keys: keys(key(flatte.KeyUp, flatte.ModSuper), char('+', 0), char('=', 0))},
+			{ID: cmdVolumeDown, Label: "Volume Down", Keys: keys(key(flatte.KeyDown, flatte.ModSuper), char('-', 0))},
+			{Separator: true},
+			{ID: cmdShuffle, Label: "Shuffle", Checked: s.shuffle, Keys: keys(char('s', 0))},
+			{ID: cmdRepeat, Label: "Repeat", Checked: s.repeat.Context, Keys: keys(char('r', 0))},
+			{Separator: true},
+			{ID: cmdLike, Label: likeLabel(liked), Keys: keys(char('l', 0)), Disabled: !song},
+		}},
+		{Title: "Go", Items: []flatte.MenuItem{
+			{ID: cmdHome, Label: "Home", Checked: s.page == pageHome, Keys: keys(char('h', 0), char('1', flatte.ModSuper)), Disabled: s.web == nil},
+			{ID: cmdSearch, Label: "Search", Checked: s.page == pageSearch, Keys: keys(char('/', 0), char('f', flatte.ModSuper), char('f', flatte.ModCtrl)), Disabled: s.web == nil},
+		}},
+	}
 }
 
 func playLabel(s *State) string {

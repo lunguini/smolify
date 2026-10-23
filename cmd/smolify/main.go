@@ -19,6 +19,7 @@ import (
 
 	"github.com/lunguini/smolify/internal/app"
 	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/spotify"
 )
 
 func main() {
@@ -61,9 +62,11 @@ func main() {
 	if *heapProfile != "" {
 		defer writeHeapProfile(*heapProfile)
 	}
-	a := app.New(p, app.HTTPImages{}, debug)
+	web := &spotify.Client{Token: p.Token}
+	a := app.New(p, app.HTTPImages{}, web, debug)
 	if *gui {
-		err = window.Run(ctx, a, window.Options{Title: "Smolify", Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
+		theme := app.WindowTheme()
+		err = window.Run(ctx, a, window.Options{Title: "Smolify", Theme: &theme, HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
 	} else {
 		err = flatte.Run(ctx, a, flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit())
 	}

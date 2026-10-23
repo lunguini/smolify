@@ -25,7 +25,7 @@ func TestWindowSnapshot(t *testing.T) {
 		t.Skip("set SMOLIFY_SNAPSHOT=<dir> to render")
 	}
 	a := sampleApp()
-	img, err := window.Snapshot(a, window.Options{Width: 110, Height: 34}, 2)
+	img, err := window.Snapshot(a, snapOptions(110, 34), 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestWindowSnapshot(t *testing.T) {
 func BenchmarkWindowFrame(b *testing.B) {
 	a := sampleApp()
 	for i := 0; b.Loop(); i++ {
-		if _, err := window.Snapshot(a, window.Options{Width: 90 + i%40, Height: 30 + i%10}, 2); err != nil {
+		if _, err := window.Snapshot(a, snapOptions(90+i%40, 30+i%10), 2); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -68,16 +68,23 @@ func BenchmarkWindowScroll(b *testing.B) {
 	s.tracks.SetHeight(20)
 	for b.Loop() {
 		s.tracks.Scroll(1)
-		if _, err := window.Snapshot(a, window.Options{Width: 110, Height: 34}, 1); err != nil {
+		if _, err := window.Snapshot(a, snapOptions(110, 34), 1); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
+// snapOptions is the main window at w×h cells, in Smolify's theme.
+func snapOptions(w, h int) window.Options {
+	theme := WindowTheme()
+	return window.Options{Width: w, Height: h, Theme: &theme}
+}
+
 // sampleApp is the app with a library, a listed playlist, and a track
 // playing.
 func sampleApp() flatte.App[State] {
-	a := New(&fake{}, nil, nil)
+	f := &fake{}
+	a := New(f, nil, f, nil)
 	s := a.State
 	s.ready = true
 	s.playlists = []player.Playlist{
@@ -107,6 +114,7 @@ func sampleApp() flatte.App[State] {
 	s.tracks.Select(2)
 	s.liked["spotify:track:0"], s.liked["spotify:track:4"] = true, true
 	s.covers["c:1"] = art(color.RGBA{230, 80, 120, 255}, color.RGBA{60, 40, 160, 255})
+	s.tints["c:1"] = tintOf(s.covers["c:1"])
 	s.covers["c:2"] = art(color.RGBA{30, 200, 140, 255}, color.RGBA{20, 40, 60, 255})
 	s.covers["c:t"] = art(color.RGBA{250, 180, 60, 255}, color.RGBA{120, 30, 60, 255})
 	s.track = &player.Track{URI: "spotify:track:0", Name: "OverThink", Artists: []string{"Kuo", "Lin"}, Duration: 213 * time.Second, Cover: "c:t", ContextURI: "p:1"}
