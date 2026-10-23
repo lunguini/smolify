@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/devgianlu/go-librespot/daemon"
@@ -26,16 +27,59 @@ type Options struct {
 	DeviceName string
 	// Volume is the initial volume, 0–100 (0: 40).
 	Volume int
+	// Audio is how it plays.
+	Audio Audio
+}
+
+// Audio is how the player plays. Changing it (Configure) restarts the
+// session, so it is not something to change per track.
+type Audio struct {
+	// Bitrate is the stream quality in kbps: 96, 160, or 320 (others: 320).
+	Bitrate int
+	// Normalise evens out loudness between tracks.
+	Normalise bool
+	// Crossfade blends the end of a track into the next (0: none).
+	Crossfade time.Duration
+	// Autoplay keeps playing similar songs when a list ends.
+	Autoplay bool
+}
+
+// bitrate is a's bitrate, 320 unless it is one Spotify streams.
+func (a Audio) bitrate() int {
+	switch a.Bitrate {
+	case 96, 160:
+		return a.Bitrate
+	}
+	return 320
 }
 
 // Player is the embedded player. Its methods may be called from any
-// goroutine; they block until the player answers (or ctx ends).
+// goroutine; they block until the player answers (or ctx ends). Requests
+// go through srv, which outlives the go-librespot session behind it, so a
+// restart (Configure, SignOut) is invisible to callers but for the wait.
 type Player struct {
-	app    *daemon.App
 	srv    *server
 	events chan Event
+	ctx    context.Context // Start's, which every session runs under
+
+	mu     sync.Mutex // guards the session fields below
+	opts   Options
+	app    *daemon.App
 	cancel context.CancelFunc
 	done   chan struct{}
+	closed bool
+
+	// ct is a client token for RecentlyPlayed, good until ctUntil.
+	ctMu    sync.Mutex
+	ct      string
+	ctUntil time.Time
+}
+
+// dir is the player's state dir.
+func (p *Player) dir() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.opts.Dir
 }
 
 // Start starts the player. It signs in with stored credentials, or reports
@@ -48,41 +92,67 @@ func Start(ctx context.Context, opts Options) (*Player, error) {
 	// go-librespot's audio output logs through logrus directly; anything it
 	// writes would land on the terminal frame.
 	logrus.SetOutput(io.Discard)
+	p := &Player{events: make(chan Event, 256), ctx: ctx, opts: opts}
+	p.srv = &server{requests: make(chan daemon.ApiRequest), emit: p.emit}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.launch(); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// launch starts a session with p.opts. Callers hold p.mu.
+func (p *Player) launch() error {
+	opts := p.opts
 	vol := opts.Volume
 	if vol <= 0 {
 		vol = 40
 	}
-	p := &Player{events: make(chan Event, 256), done: make(chan struct{})}
-	p.srv = &server{requests: make(chan daemon.ApiRequest), emit: p.emit}
 	app, err := daemon.New(&daemon.Options{
 		Logger:     quietLogger{},
 		StateStore: fileStore{dir: opts.Dir},
 		APIServer:  p.srv,
 		Config: &daemon.Config{
-			DeviceName:    opts.DeviceName,
-			DeviceType:    "computer",
-			AudioBackend:  "audio-toolbox",
-			Bitrate:       320,
-			VolumeSteps:   100,
-			InitialVolume: uint32(min(vol, 100)),
-			SkipDebounce:  600 * time.Millisecond,
-			ImageSize:     "default",
-			Metadata:      daemon.MetadataConfig{Enabled: true, MaxTracks: 2000},
-			Credentials:   daemon.CredentialsConfig{Type: "device_auth"},
+			DeviceName:            opts.DeviceName,
+			DeviceType:            "computer",
+			AudioBackend:          "audio-toolbox",
+			Bitrate:               opts.Audio.bitrate(),
+			NormalisationDisabled: !opts.Audio.Normalise,
+			CrossfadeDuration:     int(opts.Audio.Crossfade / time.Millisecond),
+			DisableAutoplay:       !opts.Audio.Autoplay,
+			VolumeSteps:           100,
+			InitialVolume:         uint32(min(vol, 100)),
+			SkipDebounce:          600 * time.Millisecond,
+			ImageSize:             "default",
+			Metadata:              daemon.MetadataConfig{Enabled: true, MaxTracks: 2000},
+			Credentials:           daemon.CredentialsConfig{Type: "device_auth"},
 		},
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	p.app = app
-	ctx, p.cancel = context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(p.ctx)
+	done := make(chan struct{})
+	p.app, p.cancel, p.done = app, cancel, done
 	go func() {
-		defer close(p.done)
+		defer close(done)
 		if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			p.emit(Failed{Err: err})
 		}
 	}()
-	return p, nil
+	return nil
+}
+
+// stop ends the running session and waits for it (a few seconds at most).
+// Callers hold p.mu.
+func (p *Player) stop() {
+	p.cancel()
+	_ = p.app.Close()
+	select {
+	case <-p.done:
+	case <-time.After(3 * time.Second):
+	}
 }
 
 // Events delivers the player's events, in order. It is never closed.
@@ -99,12 +169,80 @@ func (p *Player) emit(ev Event) {
 
 // Close stops the player.
 func (p *Player) Close() {
-	p.cancel()
-	_ = p.app.Close()
-	select {
-	case <-p.done:
-	case <-time.After(3 * time.Second):
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.closed {
+		p.closed = true
+		p.stop()
 	}
+}
+
+// Configure changes how the player plays. A change restarts the session
+// and then picks up where it was: the same track of the same list at the
+// same position, playing or paused as before. No change does nothing.
+func (p *Player) Configure(ctx context.Context, a Audio) error {
+	p.mu.Lock()
+	if p.closed || p.opts.Audio == a {
+		p.mu.Unlock()
+		return nil
+	}
+	st, statusErr := p.Status(ctx)
+	p.opts.Audio = a
+	p.stop()
+	err := p.launch()
+	p.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if statusErr != nil || st.Track == nil || st.Stopped {
+		return nil
+	}
+	return p.resume(ctx, st)
+}
+
+// resume plays st's track again where it was, paused if it was.
+func (p *Player) resume(ctx context.Context, st Status) error {
+	list := st.ContextURI
+	if list == "" {
+		list = st.Track.URI
+	}
+	if err := p.Play(ctx, list, st.Track.URI); err != nil {
+		return err
+	}
+	if st.Track.Position > 0 {
+		if err := p.Seek(ctx, st.Track.Position); err != nil {
+			return err
+		}
+	}
+	if st.Paused {
+		return p.PlayPause(ctx)
+	}
+	return nil
+}
+
+// SetDeviceName renames the player among Spotify Connect devices, now and
+// for later sessions.
+func (p *Player) SetDeviceName(ctx context.Context, name string) error {
+	p.mu.Lock()
+	p.opts.DeviceName = name
+	p.mu.Unlock()
+	_, err := p.request(ctx, daemon.ApiRequestSetDeviceName, name)
+	return err
+}
+
+// SignOut forgets the stored sign-in and restarts the session, which then
+// reports Pairing as on first launch.
+func (p *Player) SignOut(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return nil
+	}
+	p.stop()
+	if err := SignOut(p.opts.Dir); err != nil {
+		return err
+	}
+	return p.launch()
 }
 
 // ErrSuperseded reports a command a newer one replaced before it ran: the

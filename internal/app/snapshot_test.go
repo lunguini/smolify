@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	_ "image/jpeg"
 	"image/png"
 	"math"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lunguini/flatte"
+	"github.com/lunguini/flatte/flatui"
 	"github.com/lunguini/flatte/window"
 
 	"github.com/lunguini/smolify/internal/player"
@@ -36,6 +38,46 @@ func TestWindowSnapshot(t *testing.T) {
 	defer f.Close()
 	if err := png.Encode(f, img); err != nil {
 		t.Fatal(err)
+	}
+	// Liked Songs and a playlist without a cover, on Smolify's own art.
+	s := a.State
+	s.username = "adrian"
+	// Settings, with the search field focused to show its focused look.
+	s.page, s.focus = pageSettings, paneSettings
+	if img, err := window.Snapshot(a, snapOptions(110, 40), 2); err == nil {
+		if f, err := os.Create(filepath.Join(dir, "smolify-settings.png")); err == nil {
+			png.Encode(f, img)
+			f.Close()
+		}
+	}
+	s.focus = paneSearch
+	s.query = flatui.TextField{Value: "daft punk"}
+	s.query.SelectAll()
+	if img, err := window.Snapshot(a, snapOptions(110, 34), 2); err == nil {
+		if f, err := os.Create(filepath.Join(dir, "smolify-search-focus.png")); err == nil {
+			png.Encode(f, img)
+			f.Close()
+		}
+	}
+	s.focus, s.query = paneLibrary, flatui.TextField{}
+	for _, page := range []struct{ name, uri string }{{"smolify-liked.png", player.LikedSongs(s.username)}, {"smolify-nocover.png", "p:3"}} {
+		l := s.listings["p:1"]
+		l.URI = page.uri
+		s.listings[page.uri], s.shown = l, page.uri
+		libraryChanged(s)
+		name := page.name
+		img, err := window.Snapshot(a, snapOptions(110, 34), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(f, img); err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
 	}
 }
 
@@ -77,7 +119,7 @@ func BenchmarkWindowScroll(b *testing.B) {
 // snapOptions is the main window at w×h cells, in Smolify's theme.
 func snapOptions(w, h int) window.Options {
 	theme := WindowTheme()
-	return window.Options{Width: w, Height: h, Theme: &theme}
+	return window.Options{Width: w, Height: h, Theme: &theme, Fonts: WindowFonts()}
 }
 
 // sampleApp is the app with a library, a listed playlist, and a track
@@ -114,7 +156,17 @@ func sampleApp() flatte.App[State] {
 	s.tracks.Select(2)
 	s.liked["spotify:track:0"], s.liked["spotify:track:4"] = true, true
 	s.covers["c:1"] = art(color.RGBA{230, 80, 120, 255}, color.RGBA{60, 40, 160, 255})
+	if path := os.Getenv("SMOLIFY_SNAPSHOT_COVER"); path != "" {
+		// A real photo as the header cover, for judging the backdrop.
+		if f, err := os.Open(path); err == nil {
+			if im, _, err := image.Decode(f); err == nil {
+				s.covers["c:1"] = shrink(im, coverPixels)
+			}
+			f.Close()
+		}
+	}
 	s.tints["c:1"] = tintOf(s.covers["c:1"])
+	s.thumbs["c:1"], s.thumbs["c:2"], s.thumbs["c:t"] = s.covers["c:1"], s.covers["c:2"], s.covers["c:t"]
 	s.covers["c:2"] = art(color.RGBA{30, 200, 140, 255}, color.RGBA{20, 40, 60, 255})
 	s.covers["c:t"] = art(color.RGBA{250, 180, 60, 255}, color.RGBA{120, 30, 60, 255})
 	s.track = &player.Track{URI: "spotify:track:0", Name: "OverThink", Artists: []string{"Kuo", "Lin"}, Duration: 213 * time.Second, Cover: "c:t", ContextURI: "p:1"}

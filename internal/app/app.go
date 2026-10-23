@@ -38,13 +38,19 @@ type Backend interface {
 	Queue(ctx context.Context, uri string) error
 	SetLiked(ctx context.Context, uris []string, liked bool) error
 	Liked(ctx context.Context, uris []string) ([]bool, error)
+	// Configure changes how the player plays, restarting its session.
+	Configure(ctx context.Context, a player.Audio) error
+	SetDeviceName(ctx context.Context, name string) error
+	// SignOut forgets the sign-in; the player then reports Pairing.
+	SignOut(ctx context.Context) error
+	// RecentlyPlayed is the lists username played lately, newest first.
+	RecentlyPlayed(ctx context.Context, username string, limit int) ([]player.Played, error)
 }
 
 // Web is Spotify's Web API as the UI uses it (spotify.Client, or a fake in
 // tests): what the player does not serve.
 type Web interface {
 	Search(ctx context.Context, q string, limit int) (spotify.Results, error)
-	RecentlyPlayed(ctx context.Context, limit int) ([]spotify.Played, error)
 }
 
 // Images fetches cover art.
@@ -90,6 +96,11 @@ type State struct {
 	shown    string
 	focus    pane
 
+	// back and forward are the places visited before and after this one.
+	back, forward []place
+	// compact shows tracks one line each, without thumbnails.
+	compact bool
+
 	// page is what the center shows; query is the search field, and
 	// searchDelay how long typing must pause before it searches.
 	page        page
@@ -103,8 +114,11 @@ type State struct {
 
 	// covers are fetched cover images by URL, and tints their header colors;
 	// fetching marks requests in flight.
-	covers   map[string]image.Image
-	tints    map[string]color.Color
+	covers map[string]image.Image
+	tints  map[string]color.Color
+	// thumbs are covers shrunk for rows, fetched for the rows on screen.
+	thumbs   map[string]image.Image
+	thumbing map[string]bool
 	fetching map[string]bool
 
 	// drag is the slider or scroll bar being dragged ("" none), and
@@ -117,6 +131,21 @@ type State struct {
 	status string // the last error
 	notice string // the last confirmation ("Added to queue")
 
+	// settings are the Settings page's, saved at settingsPath ("": not
+	// saved); deviceName edits the device name; settingCursor is the row
+	// the keyboard is on and settingsScroll the page's scroll (at most
+	// settingsMax lines).
+	settings                    Settings
+	settingsPath                string
+	deviceName                  flatui.TextField
+	settingCursor               int
+	settingsScroll, settingsMax int
+	settingRects                map[string]layout.Rect // the page's rows, as last laid out
+	// windowed is a window app, which tells errors and confirmations as
+	// system notifications instead of on screen; away is set while the app
+	// is not in front (FocusEvent), when a new track is told too.
+	windowed, away bool
+
 	// debug, when set, records what the UI receives and sends.
 	debug io.Writer
 }
@@ -127,7 +156,9 @@ type pane int
 const (
 	paneLibrary pane = iota
 	paneTracks
-	paneSearch // the search field: keys type
+	paneSearch   // the search field: keys type
+	paneSettings // the Settings page's rows
+	paneDevice   // the device name field: keys type
 )
 
 // page is what the center shows.
@@ -137,6 +168,7 @@ const (
 	pageLibrary page = iota // the list selected in the library
 	pageHome
 	pageSearch
+	pageSettings
 )
 
 // The listings of Home (recently played) and of search results, beside the
@@ -145,6 +177,83 @@ const (
 	uriHome   = "smolify:home"
 	uriSearch = "smolify:search"
 )
+
+// place is somewhere to go back to: a page, and for the library the list.
+type place struct {
+	page page
+	list string
+}
+
+// here is where the app is.
+func (s *State) here() place {
+	p := place{page: s.page}
+	if pl, ok := s.selected(); ok && s.page == pageLibrary {
+		p.list = pl.URI
+	}
+	return p
+}
+
+// visit records leaving here for somewhere else (call before going).
+func visit(s *State) {
+	if n := len(s.back); n > 0 && s.back[n-1] == s.here() {
+		return
+	}
+	s.back, s.forward = append(s.back, s.here()), nil
+	if len(s.back) > 100 {
+		s.back = s.back[1:]
+	}
+}
+
+// goTo shows place p.
+func goTo(s *State, p place) {
+	switch p.page {
+	case pageHome:
+		openHome(s)
+	case pageSearch:
+		openSearch(s)
+	case pageSettings:
+		s.page, s.focus = pageSettings, paneSettings
+	default:
+		s.page, s.focus = pageLibrary, paneLibrary
+		for i, pl := range s.library() {
+			if pl.URI == p.list {
+				s.rail.Select(i)
+			}
+		}
+		showSelected(s)
+	}
+}
+
+// travel goes back (or forward) a place.
+func travel(s *State, forward bool) {
+	from, to := &s.back, &s.forward
+	if forward {
+		from, to = to, from
+	}
+	n := len(*from)
+	if n == 0 {
+		return
+	}
+	p := (*from)[n-1]
+	*from = (*from)[:n-1]
+	*to = append(*to, s.here())
+	goTo(s, p)
+}
+
+// typing is whether plain keys go to a field or a form rather than being
+// shortcuts: the search and device name fields, and the Settings rows
+// (where Space, ←, and → change a setting).
+func (s *State) typing() bool {
+	return s.focus == paneSearch || s.focus == paneDevice || s.page == pageSettings && s.focus == paneSettings
+}
+
+// trackRowLines is a track row's height in lines.
+func (s *State) trackRowLines() int {
+	if s.compact {
+		return 1
+	}
+	return 2
+}
 
 // virtual reports a listing that is not a playable context.
 func virtual(uri string) bool { return uri == uriHome || uri == uriSearch }
@@ -158,23 +267,31 @@ func (s *State) logf(format string, args ...any) {
 
 // Node IDs.
 const (
-	idRail     = "rail"
-	idTracks   = "tracks"
-	idRailBar  = "rail-bar"
-	idTrackBar = "tracks-bar"
-	idPlay     = "play"
-	idPrev     = "prev"
-	idNext     = "next"
-	idShuffle  = "shuffle"
-	idRepeat   = "repeat"
-	idProgress = "progress"
-	idVolume   = "volume"
-	idPlayList = "play-playlist"
-	idLike     = "like"
-	idHome     = "home"
-	idSearch   = "search"
-	idQuery    = "query"
-	idOpenPair = "open-pair"
+	idRail        = "rail"
+	idTracks      = "tracks"
+	idRailBar     = "rail-bar"
+	idTrackBar    = "tracks-bar"
+	idPlay        = "play"
+	idPrev        = "prev"
+	idNext        = "next"
+	idShuffle     = "shuffle"
+	idRepeat      = "repeat"
+	idProgress    = "progress"
+	idVolume      = "volume"
+	idPlayList    = "play-playlist"
+	idLike        = "like"
+	idHome        = "home"
+	idBack        = "back"
+	idForward     = "forward"
+	idShufflePlay = "shuffle-list"
+	idSearch      = "search"
+	idSettings    = "settings-button"
+	idSearchBox   = "search-box"
+	// idSettingsScroll is the Settings page's scroll.
+	idSettingsScroll  = "settings-scroll"
+	idSettingsContent = "settings-scroll.content"
+	idQuery           = "query"
+	idOpenPair        = "open-pair"
 )
 
 // New is the app for backend be, with web for search and Home (nil:
@@ -183,10 +300,12 @@ const (
 func New(be Backend, img Images, web Web, debug io.Writer) flatte.App[State] {
 	s := &State{
 		be: be, img: img, web: web, volMax: 100, debug: debug, searchDelay: 300 * time.Millisecond,
-		covers: map[string]image.Image{}, tints: map[string]color.Color{}, fetching: map[string]bool{},
+		covers: map[string]image.Image{}, tints: map[string]color.Color{}, thumbs: map[string]image.Image{}, thumbing: map[string]bool{}, fetching: map[string]bool{},
 		listings: map[string]player.Listing{}, listing: map[string]bool{}, stale: map[string]bool{},
 		liked: map[string]bool{}, asking: map[string]bool{},
+		settings: DefaultSettings(),
 	}
+	s.deviceName = flatui.TextField{Value: s.settings.DeviceName, Cursor: len(s.settings.DeviceName)}
 	return flatte.App[State]{
 		State: s, Init: Init, Handle: Handle, View: View, Menus: Menus, ContextMenu: ContextMenu,
 	}
@@ -221,6 +340,30 @@ func tick(s *State, _ time.Time) {
 	}
 }
 
+// Windowed is app as a window app: errors and confirmations become
+// system notifications rather than lines on screen.
+func Windowed(app flatte.App[State]) flatte.App[State] {
+	app.State.windowed = true
+	return app
+}
+
+// fail reports an error: on screen until the next success, and in a
+// window as a notification (once per distinct message).
+func fail(s *State, msg string) {
+	if s.windowed && s.settings.NotifyErrors && msg != s.status {
+		s.fx.Notify(flatte.Notification{Title: "Smolify", Body: msg})
+	}
+	s.status = msg
+}
+
+// tell reports a confirmation, as fail does an error.
+func tell(s *State, msg string) {
+	if s.windowed && s.settings.NotifyErrors {
+		s.fx.Notify(flatte.Notification{Title: "Smolify", Body: msg})
+	}
+	s.notice = msg
+}
+
 // onPlayer folds a player event into state.
 func onPlayer(s *State, ev player.Event) {
 	s.logf("event %T %+v", ev, ev)
@@ -235,6 +378,9 @@ func onPlayer(s *State, ev player.Event) {
 		}
 	case player.Track:
 		s.ready = true
+		if s.away && s.settings.NotifyTracks && (s.track == nil || s.track.URI != e.URI) {
+			s.fx.Notify(flatte.Notification{Title: nonEmpty(e.Name, "Now playing"), Body: strings.Join(e.Artists, ", ")})
+		}
 		s.track, s.position = &e, e.Position
 		if e.ContextURI != "" {
 			s.context = e.ContextURI
@@ -256,9 +402,9 @@ func onPlayer(s *State, ev player.Event) {
 	case player.Repeat:
 		s.repeat = e
 	case player.PlaybackError:
-		s.status = "Could not play this track (" + e.Kind + ")."
+		fail(s, "Could not play this track ("+e.Kind+").")
 	case player.Failed:
-		s.status = "The player stopped: " + e.Err.Error()
+		fail(s, "The player stopped: "+e.Err.Error())
 	}
 }
 
@@ -307,6 +453,9 @@ func refreshStatus(s *State) {
 		if st.Username != "" && s.username == "" {
 			s.username = st.Username
 			libraryChanged(s)
+			if s.page == pageHome {
+				openHome(s) // Home waited for the account
+			}
 		}
 	})
 }
@@ -350,7 +499,7 @@ func loadTracks(s *State, uri string) {
 		delete(s.listing, uri)
 		if err != nil {
 			s.logf("tracks %s: %v", uri, err)
-			s.status = "Could not list the tracks: " + err.Error()
+			fail(s, "Could not list the tracks: "+err.Error())
 			return
 		}
 		if old, ok := s.listings[uri]; ok && s.stale[uri] {
@@ -448,7 +597,7 @@ func setLiked(s *State, t player.Track, on bool) {
 			} else {
 				delete(s.liked, uri)
 			}
-			s.status = "Could not update Liked Songs: " + err.Error()
+			fail(s, "Could not update Liked Songs: "+err.Error())
 		}
 		if s.username != "" && s.shown == player.LikedSongs(s.username) {
 			loadTracks(s, s.shown)
@@ -488,6 +637,7 @@ func fetchCover(s *State, url string) {
 		if err != nil || im == nil {
 			return fetched{}, err
 		}
+		im = shrink(im, coverPixels)
 		return fetched{im, tintOf(im)}, nil
 	}, func(s *State, f fetched, err error) {
 		delete(s.fetching, url)
@@ -495,6 +645,53 @@ func fetchCover(s *State, url string) {
 			s.covers[url], s.tints[url] = f.im, f.tint
 		}
 	})
+}
+
+// Cover sizes kept, in pixels: a header or player bar cover (at 2x), and
+// a row's thumbnail; maxThumbs bounds how many thumbnails are kept.
+const (
+	coverPixels = 320
+	thumbPixels = 96
+	maxThumbs   = 600
+)
+
+// fetchThumb fetches the thumbnail of the cover at url once (while kept).
+func fetchThumb(s *State, url string) {
+	if url == "" || s.img == nil || s.thumbs[url] != nil || s.thumbing[url] {
+		return
+	}
+	if len(s.thumbs) >= maxThumbs {
+		s.thumbs = map[string]image.Image{} // fetched again as rows show
+	}
+	s.thumbing[url] = true
+	img := s.img
+	flatte.Go(s.fx, "thumb", func(ctx context.Context) (image.Image, error) {
+		im, err := img.Fetch(ctx, url)
+		if err != nil || im == nil {
+			return nil, err
+		}
+		return shrink(im, thumbPixels), nil
+	}, func(s *State, im image.Image, err error) {
+		delete(s.thumbing, url)
+		if err == nil && im != nil {
+			s.thumbs[url] = im
+		}
+	})
+}
+
+// fetchVisible fetches the thumbnails of the rows on screen.
+func fetchVisible(s *State) {
+	lib := s.library()
+	for i := s.rail.Offset(); i < min(s.rail.Offset()+s.rail.Height(), len(lib)); i++ {
+		fetchThumb(s, lib[i].Image)
+	}
+	if s.compact {
+		return
+	}
+	tracks := s.listings[s.shown].Tracks
+	for i := s.tracks.Offset(); i < min(s.tracks.Offset()+s.tracks.Height(), len(tracks)); i++ {
+		fetchThumb(s, tracks[i].Cover)
+	}
 }
 
 // send runs a player request off the loop; a failure becomes the status.
@@ -505,7 +702,7 @@ func send(s *State, name string, req func(context.Context, Backend) error) {
 	}, func(s *State, _ struct{}, err error) {
 		s.logf("request %s: err=%v", name, err)
 		if err != nil && !errors.Is(err, player.ErrSuperseded) { // a newer command took over
-			s.status = "Could not " + strings.ReplaceAll(name, "-", " ") + ": " + err.Error()
+			fail(s, "Could not "+strings.ReplaceAll(name, "-", " ")+": "+err.Error())
 		}
 	})
 }
@@ -545,10 +742,14 @@ const (
 	cmdPlayList   = "play-playlist"
 	cmdPlayTrack  = "play-track"
 	cmdQueue      = "queue"
+	cmdSettings   = "settings"
 	cmdLike       = "like"       // the playing track
 	cmdLikeTrack  = "like-track" // the selected track
 	cmdHome       = "home"
 	cmdSearch     = "search"
+	cmdBack       = "back"
+	cmdForward    = "forward"
+	cmdCompact    = "compact"
 	cmdQuit       = "quit"
 )
 
@@ -618,15 +819,24 @@ func command(s *State, id string, fx flatte.Effects[State]) {
 		s.status = ""
 		send(s, "play", func(ctx context.Context, be Backend) error { return be.Play(ctx, ctxURI, skip) })
 	case cmdHome:
+		if s.page != pageHome {
+			visit(s)
+		}
 		openHome(s)
 	case cmdSearch:
-		openSearch(s)
+		focusSearch(s)
+	case cmdBack, cmdForward:
+		travel(s, id == cmdForward)
+	case cmdCompact:
+		changeSetting(s, setCompact, 1)
+	case cmdSettings:
+		openSettings(s)
 	case cmdQueue:
 		t, ok := s.selectedTrack()
 		if !ok {
 			return
 		}
-		s.notice = "Added “" + nonEmpty(t.Name, "the track") + "” to the queue."
+		tell(s, "Added “"+nonEmpty(t.Name, "the track")+"” to the queue.")
 		send(s, "add-to-queue", func(ctx context.Context, be Backend) error { return be.Queue(ctx, t.URI) })
 	case cmdLike:
 		if s.track != nil {
@@ -665,6 +875,9 @@ func seek(s *State, to time.Duration) {
 // Handle routes events.
 func Handle(s *State, ev flatte.Event, fx flatte.Effects[State]) {
 	switch e := ev.(type) {
+	case flatte.FocusEvent:
+		s.away = !e.Focused
+		return
 	case flatte.LayoutEvent:
 		if e.Window != "" {
 			return
@@ -673,8 +886,13 @@ func Handle(s *State, ev flatte.Event, fx flatte.Effects[State]) {
 			s.rail.SetHeight(max(r.H/railRowLines, 1))
 		}
 		if r, ok := e.Rects[idTracks]; ok {
-			s.tracks.SetHeight(max(r.H, 1))
+			s.tracks.SetHeight(max(r.H/s.trackRowLines(), 1))
 		}
+		if _, ok := e.Rects[idSettingsScroll]; ok {
+			s.settingRects = e.Rects
+			clampSettings(s)
+		}
+		defer fetchVisible(s)
 		s.sliders = map[string]layout.Rect{}
 		for _, id := range []string{idProgress, idVolume, idRailBar, idTrackBar} {
 			if r, ok := e.Rects[id]; ok {
@@ -684,6 +902,7 @@ func Handle(s *State, ev flatte.Event, fx flatte.Effects[State]) {
 	case flatte.MenuEvent:
 		// A context menu acts on the row clicked.
 		if i, ok := rowIndex(idRail, e.Target); ok {
+			visit(s)
 			s.page = pageLibrary
 			s.rail.Select(i)
 			showSelected(s)
@@ -694,17 +913,32 @@ func Handle(s *State, ev flatte.Event, fx flatte.Effects[State]) {
 		}
 		command(s, e.ID, fx)
 	case flatte.KeyEvent:
+		if s.focus == paneDevice {
+			deviceKey(s, e, fx)
+			return
+		}
+		if s.page == pageSettings && s.focus == paneSettings && settingsKey(s, e) {
+			return
+		}
 		if s.focus == paneSearch {
 			searchKey(s, e, fx)
 			return
 		}
 		handleKey(s, e, fx)
 	case flatte.PasteEvent:
-		if s.focus == paneSearch {
-			for _, r := range strings.ReplaceAll(e.Text, "\n", " ") {
+		text := strings.ReplaceAll(e.Text, "\n", " ")
+		switch s.focus {
+		case paneSearch:
+			for _, r := range text {
 				s.query.Insert(r)
 			}
 			queueSearch(s)
+		case paneDevice:
+			for _, r := range text {
+				if len(s.deviceName.Value) < 64 {
+					s.deviceName.Insert(r)
+				}
+			}
 		}
 	case flatte.MouseEvent:
 		handleMouse(s, e, fx)
@@ -787,33 +1021,56 @@ func show(s *State, uri string) {
 func openHome(s *State) {
 	s.page, s.focus = pageHome, paneTracks
 	show(s, uriHome)
-	if s.web == nil {
-		return
+	if s.username == "" {
+		return // asked again once the account is known
 	}
-	web := s.web
-	flatte.Latest(s.fx, "home", func(ctx context.Context) ([]spotify.Played, error) {
-		return web.RecentlyPlayed(ctx, 50)
-	}, func(s *State, played []spotify.Played, err error) {
+	be, user := s.be, s.username
+	flatte.Latest(s.fx, "home", func(ctx context.Context) ([]player.Track, error) {
+		return recentTracks(ctx, be, user)
+	}, func(s *State, tracks []player.Track, err error) {
 		if err != nil {
 			s.logf("recently played: %v", err)
-			s.status = "Could not load Home: " + err.Error()
+			fail(s, "Could not load Home: "+err.Error())
 			return
-		}
-		seen := map[string]bool{}
-		var tracks []player.Track
-		for _, p := range played {
-			if seen[p.Track.URI] {
-				continue
-			}
-			seen[p.Track.URI] = true
-			t := trackFrom(p.Track)
-			if p.Context != nil {
-				t.ContextURI = p.Context.URI
-			}
-			tracks = append(tracks, t)
 		}
 		setVirtual(s, uriHome, tracks)
 	})
+}
+
+// homeLists bounds how many recently played lists Home looks into.
+const homeLists = 20
+
+// recentTracks are the tracks last played in the lists played lately,
+// each once, played where it was played from. A list the player cannot
+// list, or whose track it no longer has, is left out.
+func recentTracks(ctx context.Context, be Backend, user string) ([]player.Track, error) {
+	played, err := be.RecentlyPlayed(ctx, user, homeLists)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []player.Track
+	for _, p := range played {
+		if p.TrackURI == "" || seen[p.TrackURI] {
+			continue
+		}
+		l, err := be.ContextTracks(ctx, p.ContextURI)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		for _, t := range l.Tracks {
+			if t.URI == p.TrackURI && t.Name != "" {
+				seen[t.URI] = true
+				t.ContextURI = p.ContextURI
+				out = append(out, t)
+				break
+			}
+		}
+	}
+	return out, nil
 }
 
 // openSearch shows search with the field focused.
@@ -851,29 +1108,74 @@ func searchKey(s *State, k flatte.KeyEvent, fx flatte.Effects[State]) {
 	case flatte.KeyCtrlC:
 		fx.Quit()
 		return
-	case flatte.KeyBackspace:
-		s.query.Backspace()
-	case flatte.KeyDelete:
-		s.query.Delete()
-	case flatte.KeyLeft:
-		s.query.MoveLeft()
-		return
-	case flatte.KeyRight:
-		s.query.MoveRight()
-		return
-	case flatte.KeyCharacter:
-		if k.Mod&^flatte.ModShift != 0 {
-			return
-		}
-		s.query.Insert(k.Rune)
-	default:
-		return
 	}
-	queueSearch(s)
+	if clipboardKey(&s.query, k, fx) || editField(&s.query, k) {
+		queueSearch(s)
+	}
 }
 
-// queueSearch searches once typing pauses.
-func queueSearch(s *State) { search(s, s.searchDelay) }
+// editField applies an editing key to f, reporting whether the value
+// changed (a move or selection changes only the cursor).
+func editField(f *flatui.TextField, k flatte.KeyEvent) bool {
+	before := f.Value
+	return f.Edit(k) && f.Value != before
+}
+
+// clipboardKey copies (⌘C) or cuts (⌘X) f's selection, reporting whether
+// the value changed. Pastes arrive as PasteEvents.
+func clipboardKey(f *flatui.TextField, k flatte.KeyEvent, fx flatte.Effects[State]) bool {
+	if k.Key != flatte.KeyCharacter || k.Mod != flatte.ModSuper || (k.Rune != 'c' && k.Rune != 'x') {
+		return false
+	}
+	text := f.SelectedText()
+	if text == "" {
+		return false
+	}
+	fx.SetClipboard(text)
+	if k.Rune == 'x' {
+		f.Backspace() // deletes the selection
+		return true
+	}
+	return false
+}
+
+// queueSearch searches once typing pauses: the first character opens the
+// search page and clearing the field leaves it.
+func queueSearch(s *State) {
+	searched := strings.TrimSpace(s.query.Value) != ""
+	switch {
+	case searched && s.page != pageSearch:
+		visit(s)
+		openSearch(s)
+	case !searched && s.page == pageSearch:
+		leaveSearch(s)
+	}
+	search(s, s.searchDelay)
+}
+
+// focusSearch puts the keyboard in the search field, on whatever page is
+// shown; the search page opens only for a query (one already there, or
+// the first character typed).
+func focusSearch(s *State) {
+	s.focus = paneSearch
+	if strings.TrimSpace(s.query.Value) != "" && s.page != pageSearch {
+		visit(s)
+		openSearch(s)
+	}
+}
+
+// leaveSearch goes back to where search was opened from (Home when there
+// is nowhere to go back to), keeping the keyboard in the field.
+func leaveSearch(s *State) {
+	if n := len(s.back); n > 0 {
+		p := s.back[n-1]
+		s.back = s.back[:n-1]
+		goTo(s, p)
+	} else {
+		openHome(s)
+	}
+	s.focus = paneSearch
+}
 
 // search looks the query up after delay; a newer search supersedes it, and
 // an empty query clears the results.
@@ -900,7 +1202,7 @@ func search(s *State, delay time.Duration) {
 	}, func(s *State, r spotify.Results, err error) {
 		s.logf("search %q: %d tracks, err=%v", q, len(r.Tracks), err)
 		if err != nil {
-			s.status = "Could not search: " + err.Error()
+			fail(s, "Could not search: "+err.Error())
 			return
 		}
 		s.status = ""
@@ -963,11 +1265,15 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	if m.Button != flatte.MouseLeft || m.Action != flatte.MousePress {
 		return
 	}
+	if settingClicked(s, m.Target) {
+		return
+	}
 	if i, ok := rowIndex(idRail, m.Target); ok {
 		if i == s.rail.Cursor() && s.focus == paneLibrary && s.page == pageLibrary {
 			command(s, cmdPlayList, fx) // a click on the selected one plays it
 			return
 		}
+		visit(s)
 		s.focus, s.page = paneLibrary, pageLibrary
 		s.rail.Select(i)
 		showSelected(s)
@@ -999,7 +1305,15 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 		command(s, cmdLike, fx)
 	case idHome:
 		command(s, cmdHome, fx)
-	case idSearch, idQuery:
+	case idShufflePlay:
+		command(s, cmdShuffle, fx)
+	case idBack:
+		command(s, cmdBack, fx)
+	case idForward:
+		command(s, cmdForward, fx)
+	case idSettings:
+		command(s, cmdSettings, fx)
+	case idSearch, idQuery, idSearchBox:
 		command(s, cmdSearch, fx)
 	case idOpenPair:
 		openURL(s, s.pairing.URL)
@@ -1024,6 +1338,8 @@ func wheel(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 		rows = -1
 	}
 	switch {
+	case s.page == pageSettings && !strings.HasPrefix(m.Target, idRail) && m.Target != idProgress:
+		s.settingsScroll = min(max(s.settingsScroll+rows*2, 0), s.settingsMax)
 	case m.Target == idVolume && up:
 		command(s, cmdVolumeUp, fx)
 	case m.Target == idVolume:

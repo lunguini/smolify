@@ -31,19 +31,33 @@ type fake struct {
 	listings  map[string]player.Listing
 	liked     map[string]bool
 
-	// The Web API: results by query, the recently played, and a failure.
+	// recent is the recently played lists; the Web API's results by
+	// query, and its failure.
+	recent  []player.Played
 	results map[string]spotify.Results
-	played  []spotify.Played
 	webFail error
+}
+
+func (f *fake) Configure(_ context.Context, a player.Audio) error {
+	f.calls = append(f.calls, fmt.Sprintf("configure %d %v %v %v", a.Bitrate, a.Normalise, a.Crossfade, a.Autoplay))
+	return f.fail
+}
+func (f *fake) SetDeviceName(_ context.Context, name string) error {
+	f.calls = append(f.calls, "rename "+name)
+	return f.fail
+}
+func (f *fake) SignOut(context.Context) error {
+	f.calls = append(f.calls, "sign out")
+	return f.fail
 }
 
 func (f *fake) Search(_ context.Context, q string, _ int) (spotify.Results, error) {
 	f.reads = append(f.reads, "search "+q)
 	return f.results[q], f.webFail
 }
-func (f *fake) RecentlyPlayed(context.Context, int) ([]spotify.Played, error) {
-	f.reads = append(f.reads, "recent")
-	return f.played, f.webFail
+func (f *fake) RecentlyPlayed(_ context.Context, user string, _ int) ([]player.Played, error) {
+	f.reads = append(f.reads, "recent "+user)
+	return f.recent, f.fail
 }
 
 func (f *fake) Events() <-chan player.Event { return nil }
@@ -311,6 +325,7 @@ func TestWheelScrollsTheListNotTheSelection(t *testing.T) {
 	}
 	long.Length, long.Cached = 40, 40
 	f.listings[long.URI] = long
+	d.State().compact = true
 	event(d, player.Ready{})
 	d.Send(flatte.MenuEvent{ID: "none", Target: idTracks + ":1"}) // select row 1
 	_, comp := flatte.ComposeFrame(d.Frame(), 100, 30)
@@ -395,8 +410,9 @@ func TestClock(t *testing.T) {
 
 func TestTrackTablePlaysFromATrack(t *testing.T) {
 	d, f := ready(t)
+	d.State().compact = true
 	fr := d.Frame()
-	for _, want := range []string{"#  ", "TITLE", "ALBUM", "TIME", "Overthink  Kuo, Lin", "Thinking", "3:20", "Gravity  Dua", "61:00"} {
+	for _, want := range []string{"#  ", "Title", "Album", "◷", "Overthink  Kuo, Lin", "Thinking", "3:20", "Gravity  Dua", "61:00"} {
 		if !strings.Contains(plain(fr), want) {
 			t.Errorf("table missing %q:\n%s", want, plain(fr))
 		}
@@ -451,6 +467,7 @@ func TestPartialListingIsAskedAgain(t *testing.T) {
 	d, f, _ := start(t)
 	partial := player.Listing{URI: "spotify:playlist:a", Length: 3, Cached: 0}
 	f.listings["spotify:playlist:a"] = partial
+	d.State().compact = true
 	event(d, player.Ready{})
 	if !strings.Contains(plain(d.Frame()), "Listing the tracks…") {
 		t.Fatalf("partial:\n%s", plain(d.Frame()))
@@ -458,7 +475,7 @@ func TestPartialListingIsAskedAgain(t *testing.T) {
 	// Ready, but metadata still coming: rows show as placeholders.
 	f.listings["spotify:playlist:a"] = player.Listing{URI: partial.URI, Ready: true, Length: 3, Cached: 1, Tracks: []player.Track{song, {URI: "spotify:track:2"}, {URI: "spotify:episode:3"}}}
 	d.Advance(time.Second)
-	if fr := plain(d.Frame()); !strings.Contains(fr, "Overthink") || !strings.Contains(fr, "2    …") {
+	if fr := plain(d.Frame()); !strings.Contains(fr, "Overthink") || !regexp.MustCompile(`2 +…`).MatchString(fr) {
 		t.Fatalf("placeholders:\n%s", fr)
 	}
 	f.listings["spotify:playlist:a"] = bassHouse
@@ -613,11 +630,18 @@ func typeText(d *flatest.Driver[State], text string) {
 func TestSearchAsYouType(t *testing.T) {
 	d, f := ready(t)
 	f.results = map[string]spotify.Results{"over": found}
+	d.State().compact = true
 	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: '/'})
 	s := d.State()
-	if s.page != pageSearch || s.focus != paneSearch || !strings.Contains(plain(d.Frame()), "Type to search songs.") {
-		t.Fatalf("page %v focus %v:\n%s", s.page, s.focus, plain(d.Frame()))
+	// The field takes the keyboard; the page stays until something is typed.
+	if s.page != pageLibrary || s.focus != paneSearch {
+		t.Fatalf("page %v focus %v", s.page, s.focus)
 	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: ' '})
+	if s.page != pageLibrary {
+		t.Fatalf("a space opened search: page %v", s.page)
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyBackspace})
 	// Plain keys type: s, r, space do not toggle shuffle, repeat, or play.
 	typeText(d, "over")
 	if len(f.calls) != 0 || s.shuffle || s.query.Value != "over" {
@@ -658,8 +682,9 @@ func TestSearchAsYouType(t *testing.T) {
 	for range 4 {
 		d.Send(flatte.KeyEvent{Key: flatte.KeyBackspace})
 	}
-	if fr := plain(d.Settle()); !strings.Contains(fr, "Type to search songs.") || strings.Contains(fr, "Overture") {
-		t.Fatalf("cleared:\n%s", fr)
+	// Clearing the field goes back to where search began, still typing.
+	if fr := plain(d.Settle()); s.page != pageLibrary || s.shown != "spotify:playlist:a" || s.focus != paneSearch || strings.Contains(fr, "Overture") {
+		t.Fatalf("cleared: page %v shown %q focus %v:\n%s", s.page, s.shown, s.focus, fr)
 	}
 	// Esc with no results leaves for the library, where keys are commands.
 	d.Send(flatte.KeyEvent{Key: flatte.KeyEscape})
@@ -693,6 +718,7 @@ func TestSearchPasteAndErrors(t *testing.T) {
 func TestMenusWhileTyping(t *testing.T) {
 	d, _ := ready(t)
 	d.Send(flatte.MenuEvent{ID: cmdSearch})
+	typeText(d, "x")
 	for _, m := range Menus(d.State()) {
 		for _, it := range m.Items {
 			for _, k := range it.Keys {
@@ -702,21 +728,25 @@ func TestMenusWhileTyping(t *testing.T) {
 			}
 		}
 	}
-	go1 := Menus(d.State())[1]
-	if go1.Title != "Go" || !go1.Items[1].Checked || len(go1.Items[1].Keys) != 2 {
-		t.Fatalf("Go menu %+v", go1)
+	search := menuItem(t, d.State(), cmdSearch)
+	if !search.Checked || len(search.Keys) != 2 {
+		t.Fatalf("search item %+v", search)
 	}
 }
 
 func TestHomeIsRecentlyPlayed(t *testing.T) {
 	d, f := ready(t)
-	at := time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)
-	f.played = []spotify.Played{
-		{Track: found.Tracks[0], PlayedAt: at, Context: &struct {
-			URI string `json:"uri"`
-		}{URI: "spotify:playlist:a"}},
-		{Track: found.Tracks[1], PlayedAt: at.Add(-time.Hour)},
-		{Track: found.Tracks[0], PlayedAt: at.Add(-2 * time.Hour)}, // again: listed once
+	event(d, song)
+	d.State().username = "adrian" // the account is known: Liked Songs joins the rail
+	libraryChanged(d.State())
+	f.listings["spotify:album:o"] = player.Listing{URI: "spotify:album:o", Ready: true, Length: 1, Cached: 1, Tracks: []player.Track{
+		{URI: "spotify:track:9", Name: "Overture", Artists: []string{"Orchestra"}, Album: "Openings", Duration: 95 * time.Second},
+	}}
+	f.recent = []player.Played{
+		{ContextURI: "spotify:album:o", TrackURI: "spotify:track:9"},
+		{ContextURI: "spotify:playlist:a", TrackURI: "spotify:track:2"},
+		{ContextURI: "spotify:playlist:a", TrackURI: "spotify:track:9"},    // again: listed once
+		{ContextURI: "spotify:artist:gone", TrackURI: "spotify:track:404"}, // not listable: left out
 	}
 	f.liked = map[string]bool{"spotify:track:9": true}
 	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: 'h'})
@@ -732,12 +762,25 @@ func TestHomeIsRecentlyPlayed(t *testing.T) {
 	// A recently played song plays where it was played from.
 	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
 	d.Settle()
-	if len(f.calls) != 1 || f.calls[0] != "play spotify:playlist:a spotify:track:9" {
+	if len(f.calls) != 1 || f.calls[0] != "play spotify:album:o spotify:track:9" {
 		t.Fatalf("calls %v", f.calls)
 	}
-	// Back to the library with a click on a list.
+	if got := d.State().listings[uriHome].Tracks; len(got) != 2 || got[1].Name != "Gravity" || got[1].ContextURI != "spotify:playlist:a" {
+		t.Fatalf("home tracks %+v", got)
+	}
+	// Back to the library with a click on a list: Car Music, wherever it is
+	// now that the account is known (Liked Songs comes first).
+	row := -1
+	for i, pl := range s.library() {
+		if pl.Name == "Car Music" {
+			row = i
+		}
+	}
 	_, comp := flatte.ComposeFrame(d.Frame(), 100, 30)
-	r := comp.Rects[idRail+":1"]
+	r, ok := comp.Rects[idRail+":"+strconv.Itoa(row)]
+	if !ok {
+		t.Fatalf("Car Music (row %d) not on screen", row)
+	}
 	d.Send(flatte.MouseEvent{X: r.X + 1, Y: r.Y, Button: flatte.MouseLeft, Action: flatte.MousePress})
 	if fr := plain(d.Settle()); s.page != pageLibrary || !strings.Contains(fr, "For the road.") || !strings.Contains(fr, " songs") || len(f.calls) != 1 {
 		t.Fatalf("page %v calls %v:\n%s", s.page, f.calls, fr)
@@ -749,9 +792,9 @@ func TestNoWebAPI(t *testing.T) {
 	d := flatest.Start(New(f, nil, nil, nil), 100)
 	d.Send(flatte.ResizeEvent{Width: 100, Height: 30})
 	event(d, player.Ready{})
-	g := Menus(d.State())[1]
-	if !g.Items[0].Disabled || !g.Items[1].Disabled {
-		t.Fatalf("Go menu enabled without the Web API: %+v", g)
+	// Home comes from the player; only search needs the Web API.
+	if menuItem(t, d.State(), cmdHome).Disabled || !menuItem(t, d.State(), cmdSearch).Disabled {
+		t.Fatal("Home disabled, or Search enabled, without the Web API")
 	}
 }
 
@@ -809,5 +852,77 @@ func TestSupersededIsNotAnError(t *testing.T) {
 	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
 	if fr := plain(d.Settle()); d.State().status != "" || strings.Contains(fr, "superseded") {
 		t.Fatalf("status %q", d.State().status)
+	}
+}
+
+// menuItem is the menu bar item id.
+func menuItem(t *testing.T, s *State, id string) flatte.MenuItem {
+	t.Helper()
+	for _, m := range Menus(s) {
+		for _, it := range m.Items {
+			if it.ID == id {
+				return it
+			}
+		}
+	}
+	t.Fatalf("no menu item %q", id)
+	return flatte.MenuItem{}
+}
+
+func TestComfortableRowsAndThumbnails(t *testing.T) {
+	d, f, c := start(t)
+	tracks := bassHouse
+	tracks.Tracks = append([]player.Track(nil), bassHouse.Tracks...)
+	tracks.Tracks[1].Cover = "https://img/fall"
+	f.listings[tracks.URI] = tracks
+	event(d, player.Ready{})
+	fr := plain(d.Settle())
+	// Title and artists on two lines.
+	if !regexp.MustCompile(`Gravity +Fall`).MatchString(fr) || !strings.Contains(fr, "Dua") || strings.Contains(fr, "Gravity  Dua") {
+		t.Fatalf("two-line rows:\n%s", fr)
+	}
+	// The covers of the rows on screen are fetched as thumbnails.
+	d.Settle()
+	if !strings.Contains(strings.Join(c.fetched, ","), "https://img/fall") || d.State().thumbs["https://img/fall"] == nil {
+		t.Fatalf("thumbnails %v", c.fetched)
+	}
+	// View ▸ Compact Rows: one line each.
+	d.Send(flatte.MenuEvent{ID: cmdCompact})
+	if fr := plain(d.Settle()); !strings.Contains(fr, "Gravity  Dua") || !menuItem(t, d.State(), cmdCompact).Checked {
+		t.Fatalf("compact:\n%s", fr)
+	}
+}
+
+func TestBackAndForward(t *testing.T) {
+	d, f := ready(t)
+	_ = f
+	s := d.State()
+	if !menuItem(t, s, cmdBack).Disabled {
+		t.Fatal("back enabled with nowhere to go")
+	}
+	// Library list a → Home → list b (a click) → back, back, forward.
+	d.Send(flatte.MenuEvent{ID: cmdHome})
+	d.Send(flatte.MenuEvent{ID: cmdPlayList, Target: idRail + ":1"})
+	d.Settle()
+	if s.page != pageLibrary || s.shown != "spotify:playlist:b" {
+		t.Fatalf("page %v shown %q", s.page, s.shown)
+	}
+	d.Send(flatte.MenuEvent{ID: cmdBack})
+	if s.page != pageHome {
+		t.Fatalf("back: page %v", s.page)
+	}
+	d.Send(flatte.MenuEvent{ID: cmdBack})
+	if s.page != pageLibrary || s.shown != "spotify:playlist:a" || len(s.back) != 0 {
+		t.Fatalf("back again: page %v shown %q back %v", s.page, s.shown, s.back)
+	}
+	d.Send(flatte.MenuEvent{ID: cmdForward})
+	if s.page != pageHome || menuItem(t, s, cmdForward).Disabled {
+		t.Fatalf("forward: page %v", s.page)
+	}
+	// Going somewhere new drops the forward places.
+	d.Send(flatte.MenuEvent{ID: cmdSearch})
+	typeText(d, "x")
+	if len(s.forward) != 0 {
+		t.Fatalf("forward kept %v", s.forward)
 	}
 }

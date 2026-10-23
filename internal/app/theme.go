@@ -1,8 +1,12 @@
 package app
 
 import (
+	"bytes"
+	_ "embed"
 	"image"
 	"image/color"
+	_ "image/png"
+	"sync"
 
 	"charm.land/lipgloss/v2"
 
@@ -10,30 +14,66 @@ import (
 	"github.com/lunguini/flatte/window"
 )
 
-// The palette: cards on a black window, one green accent.
+// The palette: cards on a black window and Smolify's violet, the one
+// accent.
 var (
-	accent    = lipgloss.Color("#1ed760")
-	ink       = lipgloss.Color("#000000")           // the window behind the cards
-	cardBg    = color.NRGBA{0x12, 0x12, 0x12, 0xe6} // a little of the blur shows
-	railBg    = color.NRGBA{0x18, 0x18, 0x18, 0xe6} // the library, a shade apart
-	tileBg    = lipgloss.Color("#282828")           // a cover not loaded yet
-	danger    = lipgloss.Color("#f15e6c")
-	white     = lipgloss.Color("#ffffff")
-	subtle    = layout.TextStyle{Role: layout.TextSubtle}
-	strong    = layout.TextStyle{Bold: true}
-	caption   = layout.TextStyle{Role: layout.TextSubtle, Size: 11, Bold: true}
-	secondary = layout.TextStyle{Role: layout.TextSubtle, Size: 12} // a line about the line above
+	brand         = lipgloss.Color("#9d7bff")
+	ink           = lipgloss.Color("#000000")           // the window behind the cards
+	cardBg        = color.NRGBA{0x12, 0x12, 0x12, 0xe6} // a little of the blur shows
+	railBg        = color.NRGBA{0x18, 0x18, 0x18, 0xe6} // the library, a shade apart
+	tileBg        = lipgloss.Color("#282828")           // a cover not loaded yet
+	playingBg     = color.NRGBA{0x9d, 0x7b, 0xff, 0x1f} // the playing row, violet-washed
+	hoverBg       = color.NRGBA{0xff, 0xff, 0xff, 0x12} // a row under the pointer
+	searchBg      = lipgloss.Color("#1f1f1f")           // the search box
+	searchFocusBg = lipgloss.Color("#2a2a2a")           // the search box while typing
+	backdropDim   = color.NRGBA{0, 0, 0, 0xa0}          // over a header's blurred cover
+	artVeil       = color.NRGBA{0x5b, 0x3f, 0xd0, 0x30} // over Smolify's art; a dark violet tile in a terminal
+	danger        = lipgloss.Color("#f15e6c")
+	white         = lipgloss.Color("#ffffff")
+	subtle        = layout.TextStyle{Role: layout.TextSubtle}
+	strong        = layout.TextStyle{Bold: true}
+	caption       = layout.TextStyle{Role: layout.TextSubtle, Size: 11, Bold: true}
+	secondary     = layout.TextStyle{Role: layout.TextSubtle, Size: 12} // a line about the line above
 )
 
-// WindowTheme is Smolify's look in a window: Spotify-dark, the accent for
+// Inter (rsms.me/inter, SIL Open Font License: fonts/OFL.txt), Smolify's
+// type in a window.
+var (
+	//go:embed fonts/Inter-Regular.ttf
+	interRegular []byte
+	//go:embed fonts/Inter-Bold.ttf
+	interBold []byte
+)
+
+//go:embed images/logo.png
+var logoPNG []byte
+
+// logo is Smolify's logo, shrunk once to the size the top bar draws it at
+// (2× for Retina).
+var logo = sync.OnceValue(func() image.Image {
+	im, _, err := image.Decode(bytes.NewReader(logoPNG))
+	if err != nil {
+		return nil
+	}
+	return shrink(im, 2*logoPoints)
+})
+
+// logoPoints is the logo's size in the top bar.
+const logoPoints = 28
+
+// WindowFonts are the font files a window needs for WindowTheme.
+func WindowFonts() [][]byte { return [][]byte{interRegular, interBold} }
+
+// WindowTheme is Smolify's look in a window: dark, the brand violet for
 // focus and default buttons, a soft white for selected rows.
 func WindowTheme() window.Theme {
 	return window.Theme{
 		Background: ink, Surface: lipgloss.Color("#282828"),
 		Text: lipgloss.Color("#e9e9e9"), Subtle: lipgloss.Color("#a7a7a7"), Title: white,
 		Border: lipgloss.Color("#2f2f2f"), Field: lipgloss.Color("#242424"),
-		Accent: accent, Selection: color.NRGBA{0xff, 0xff, 0xff, 0x1a},
+		Accent: brand, Selection: color.NRGBA{0xff, 0xff, 0xff, 0x1a},
 		Track:    lipgloss.Color("#4d4d4d"),
+		Font:     "Inter",
 		FontSize: 13, TitleSize: 15, LineSpacing: 1.35, Radius: 6,
 	}
 }

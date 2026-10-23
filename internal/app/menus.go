@@ -23,12 +23,14 @@ func Menus(s *State) []flatte.Menu {
 	song := !noTrack && strings.HasPrefix(s.track.URI, "spotify:track:")
 	liked := !noTrack && s.liked[s.track.URI]
 	keys := func(ks ...flatte.KeyEvent) []flatte.KeyEvent {
-		if s.focus != paneSearch {
+		if !s.typing() {
 			return ks
 		}
+		// Only chords stay, and not the ones a field edits with (⌘← moves
+		// to the start of the text rather than to the previous track).
 		var chords []flatte.KeyEvent
 		for _, k := range ks {
-			if k.Mod&(flatte.ModCtrl|flatte.ModSuper|flatte.ModAlt) != 0 {
+			if k.Mod&(flatte.ModCtrl|flatte.ModSuper|flatte.ModAlt) != 0 && !editingKey(k.Key) {
 				chords = append(chords, k)
 			}
 		}
@@ -52,8 +54,15 @@ func Menus(s *State) []flatte.Menu {
 			{ID: cmdLike, Label: likeLabel(liked), Keys: keys(char('l', 0)), Disabled: !song},
 		}},
 		{Title: "Go", Items: []flatte.MenuItem{
-			{ID: cmdHome, Label: "Home", Checked: s.page == pageHome, Keys: keys(char('h', 0), char('1', flatte.ModSuper)), Disabled: s.web == nil},
+			{ID: cmdBack, Label: "Back", Keys: keys(char('[', flatte.ModSuper), key(flatte.KeyLeft, flatte.ModAlt)), Disabled: len(s.back) == 0},
+			{ID: cmdForward, Label: "Forward", Keys: keys(char(']', flatte.ModSuper), key(flatte.KeyRight, flatte.ModAlt)), Disabled: len(s.forward) == 0},
+			{Separator: true},
+			{ID: cmdHome, Label: "Home", Checked: s.page == pageHome, Keys: keys(char('h', 0), char('1', flatte.ModSuper))},
 			{ID: cmdSearch, Label: "Search", Checked: s.page == pageSearch, Keys: keys(char('/', 0), char('f', flatte.ModSuper), char('f', flatte.ModCtrl)), Disabled: s.web == nil},
+			{ID: cmdSettings, Label: "Settings", Checked: s.page == pageSettings, Keys: keys(char(',', flatte.ModSuper), char(',', flatte.ModCtrl))},
+		}},
+		{Title: "View", Items: []flatte.MenuItem{
+			{ID: cmdCompact, Label: "Compact Rows", Checked: s.compact, Keys: keys(char('d', 0))},
 		}},
 	}
 }
@@ -106,7 +115,16 @@ func openURL(s *State, url string) {
 		return struct{}{}, exec.CommandContext(ctx, "open", url).Run()
 	}, func(s *State, _ struct{}, err error) {
 		if err != nil {
-			s.status = "Could not open the browser: " + err.Error()
+			fail(s, "Could not open the browser: "+err.Error())
 		}
 	})
+}
+
+// editingKey is a key a text field uses with any modifier.
+func editingKey(k flatte.Key) bool {
+	switch k {
+	case flatte.KeyLeft, flatte.KeyRight, flatte.KeyHome, flatte.KeyEnd, flatte.KeyBackspace, flatte.KeyDelete:
+		return true
+	}
+	return false
 }

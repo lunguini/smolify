@@ -1,7 +1,5 @@
 package spotify
 
-import "time"
-
 type page[T any] struct {
 	Items []T `json:"items"`
 }
@@ -41,15 +39,6 @@ type Image struct {
 	URL    string `json:"url"`
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
-}
-
-// Played is a track the user played, and where from.
-type Played struct {
-	Track    Track     `json:"track"`
-	PlayedAt time.Time `json:"played_at"`
-	Context  *struct {
-		URI string `json:"uri"`
-	} `json:"context"`
 }
 
 // Cover is the URL of the smallest of images at least px wide, or the

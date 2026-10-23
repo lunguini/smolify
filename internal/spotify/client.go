@@ -208,12 +208,3 @@ func nonNil(pls []Playlist) []Playlist {
 	}
 	return out
 }
-
-// RecentlyPlayed is the user's last played tracks, newest first.
-func (c *Client) RecentlyPlayed(ctx context.Context, limit int) ([]Played, error) {
-	var out page[Played]
-	if err := c.get(ctx, "/me/player/recently-played", url.Values{"limit": {strconv.Itoa(limit)}}, &out); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}

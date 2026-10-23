@@ -71,28 +71,15 @@ func TestSearchRetriesARejectedToken(t *testing.T) {
 }
 
 func TestTokenExpires(t *testing.T) {
-	c, _, asked := server(t, map[string]string{"/me/player/recently-played": `{"items":[]}`}, "good")
+	c, _, asked := server(t, map[string]string{"/search": `{}`}, "good")
 	c.Token = func(context.Context) (string, error) { *asked++; return "good", nil }
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	c.Now = func() time.Time { return now }
-	c.RecentlyPlayed(context.Background(), 5)
+	c.Search(context.Background(), "x", 5)
 	now = now.Add(tokenLife + time.Second)
-	c.RecentlyPlayed(context.Background(), 5)
+	c.Search(context.Background(), "x", 5)
 	if *asked != 2 {
 		t.Fatalf("asked %d, want a new token after %v", *asked, tokenLife)
-	}
-}
-
-func TestRecentlyPlayed(t *testing.T) {
-	body := `{"items":[{"track":{"uri":"spotify:track:1","name":"A"},"played_at":"2026-10-22T10:00:00Z","context":{"uri":"spotify:playlist:p"}},{"track":{"uri":"spotify:track:2","name":"B"},"played_at":"2026-10-22T09:00:00Z","context":null}]}`
-	c, _, _ := server(t, map[string]string{"/me/player/recently-played": body}, "good")
-	c.Token = func(context.Context) (string, error) { return "good", nil }
-	got, err := c.RecentlyPlayed(context.Background(), 50)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 || got[0].Context == nil || got[0].Context.URI != "spotify:playlist:p" || got[1].Context != nil || !got[0].PlayedAt.Equal(time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)) {
-		t.Fatalf("played %+v", got)
 	}
 }
 
@@ -112,7 +99,7 @@ func TestErrors(t *testing.T) {
 		t.Fatal((Error{Status: 403, Message: "Insufficient client scope"}).Error())
 	}
 	c = &Client{Base: srv.URL, Token: func(context.Context) (string, error) { return "", errors.New("not signed in") }}
-	if _, err := c.RecentlyPlayed(context.Background(), 1); err == nil || err.Error() != "not signed in" {
+	if _, err := c.Search(context.Background(), "x", 1); err == nil || err.Error() != "not signed in" {
 		t.Fatalf("token failure: %v", err)
 	}
 }

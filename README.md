@@ -19,3 +19,6 @@ go run ./cmd/smolify -debug-log smolify.log # log player events and memory
 ## License
 
 GPL-3.0 — see [LICENSE](LICENSE).
+
+The bundled Inter font (`internal/app/fonts`) is under the SIL Open Font
+License 1.1 — see [its license](internal/app/fonts/OFL.txt).

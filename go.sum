@@ -52,8 +52,12 @@ github.com/lucasb-eyer/go-colorful v1.4.0 h1:UtrWVfLdarDgc44HcS7pYloGHJUjHV/4FwW
 github.com/lucasb-eyer/go-colorful v1.4.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/lunguini/flatte v0.1.2-0.20261023061100-82f264e891db h1:f7o44VEZdPmc9Tzo+eSVR8kjrQGatnvfRcXBtaqQZ00=
 github.com/lunguini/flatte v0.1.2-0.20261023061100-82f264e891db/go.mod h1:Iet7Zl+t7J/vcof6mmo1wZsZ8oRBIXgaFqBEbNNn0fE=
+github.com/lunguini/flatte v0.1.2-0.20261023164441-4fe3a1f01622 h1:2vzfwrOiL3Q8IuMhb7DHrqI5QhHcq7yvXz7Fb5XnDY4=
+github.com/lunguini/flatte v0.1.2-0.20261023164441-4fe3a1f01622/go.mod h1:Iet7Zl+t7J/vcof6mmo1wZsZ8oRBIXgaFqBEbNNn0fE=
 github.com/lunguini/flatte/window v0.0.0-20261023061100-82f264e891db h1:D86dWfj5JYDbK8Mk45GQcvBEwK3zJ+eMyIVT/0F2pkQ=
 github.com/lunguini/flatte/window v0.0.0-20261023061100-82f264e891db/go.mod h1:6/jtraVkOu7riuThWXqQ/lWYO+qQwziqT/r7/NCw6Yk=
+github.com/lunguini/flatte/window v0.0.0-20261023164441-4fe3a1f01622 h1:JMOXr2o3tSw0fXnSmackm6PfBSeqzCY7Kyyrp+UFW48=
+github.com/lunguini/flatte/window v0.0.0-20261023164441-4fe3a1f01622/go.mod h1:6/jtraVkOu7riuThWXqQ/lWYO+qQwziqT/r7/NCw6Yk=
 github.com/mattn/go-runewidth v0.0.23 h1:7ykA0T0jkPpzSvMS5i9uoNn2Xy3R383f9HDx3RybWcw=
 github.com/mattn/go-runewidth v0.0.23/go.mod h1:XBkDxAl56ILZc9knddidhrOlY5R/pDhgLpndooCuJAs=
 github.com/miekg/dns v1.1.27/go.mod h1:KNUDUusw/aVsxyTYZM1oqvCicbwhgbNgztCETuNZ7xM=

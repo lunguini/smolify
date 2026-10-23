@@ -43,7 +43,12 @@ func main() {
 	}
 
 	ctx := context.Background()
-	p, err := player.Start(ctx, player.Options{Dir: dir, DeviceName: "Smolify"})
+	settingsPath := app.SettingsPath(dir)
+	settings, err := app.LoadSettings(settingsPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "smolify: settings:", err, "(using the defaults)")
+	}
+	p, err := player.Start(ctx, player.Options{Dir: dir, DeviceName: settings.DeviceName, Audio: settings.Audio()})
 	if err != nil {
 		fail(err)
 	}
@@ -63,12 +68,13 @@ func main() {
 		defer writeHeapProfile(*heapProfile)
 	}
 	web := &spotify.Client{Token: p.Token}
-	a := app.New(p, app.HTTPImages{}, web, debug)
+	a := app.WithSettings(app.New(p, app.HTTPImages{}, web, debug), settingsPath, settings)
 	if *gui {
+		a = app.Windowed(a)
 		theme := app.WindowTheme()
-		err = window.Run(ctx, a, window.Options{Title: "Smolify", Theme: &theme, HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
+		err = window.Run(ctx, a, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
 	} else {
-		err = flatte.Run(ctx, a, flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit())
+		err = flatte.Run(ctx, a, flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit(), flatte.WithReportFocus())
 	}
 	if err != nil {
 		fail(err)
