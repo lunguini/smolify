@@ -130,6 +130,7 @@ func start(t *testing.T) (*flatest.Driver[State], *fake, *covers) {
 	f := &fake{playlists: library, status: player.Status{Volume: 40, VolumeSteps: 100, Paused: true}, listings: map[string]player.Listing{"spotify:playlist:a": bassHouse}}
 	c := &covers{}
 	d := flatest.Start(New(f, c, f, nil), 100)
+	d.State().page = pageLibrary
 	d.State().searchDelay = 0
 	d.Send(flatte.ResizeEvent{Width: 100, Height: 30})
 	return d, f, c
@@ -145,7 +146,7 @@ func plain(f flatte.Frame) string { return flatest.CleanFrame(f.Content) }
 
 func TestPairingThenLibrary(t *testing.T) {
 	d, f, c := start(t)
-	if !strings.Contains(plain(d.Frame()), "Connecting to Spotify") {
+	if !strings.Contains(plain(d.Frame()), "Loading") {
 		t.Fatalf("splash:\n%s", plain(d.Frame()))
 	}
 	fr := event(d, player.Pairing{URL: "https://spotify.com/pair?code=AB12", Code: "AB12", Expires: time.Date(2026, 1, 1, 13, 5, 0, 0, time.UTC)})
@@ -195,7 +196,8 @@ func TestBrowseAndPlay(t *testing.T) {
 	if len(f.calls) != 1 || f.calls[0] != "play spotify:playlist:b " {
 		t.Fatalf("calls %v", f.calls)
 	}
-	// Space with nothing loaded plays the selected playlist too.
+	// Space on a fresh idle player also starts its selected playlist.
+	d, f = ready(t)
 	f.calls = nil
 	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: ' '})
 	d.Settle()
@@ -434,7 +436,15 @@ func TestTrackTablePlaysFromATrack(t *testing.T) {
 	if d.State().rail.Cursor() != 0 {
 		t.Fatal("the arrows moved the library while the tracks had focus")
 	}
-	// Tab goes back to the library, where the arrows move the selection.
+	// Tab visits the playlist filter, sorting, then the library.
+	d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
+	if d.State().focus != paneTrackFilter {
+		t.Fatal("playlist filter missing from tab order")
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
+	if d.State().focus != paneSort {
+		t.Fatal("sort control missing from tab order")
+	}
 	d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
 	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
 	if d.State().rail.Cursor() != 1 || d.State().tracks.Cursor() != 0 {
@@ -490,7 +500,7 @@ func TestPartialListingIsAskedAgain(t *testing.T) {
 func TestTrackContextMenu(t *testing.T) {
 	d, f := ready(t)
 	items := ContextMenu(d.State(), idTracks+":1")
-	if len(items) != 4 || items[0].ID != cmdPlayTrack || items[1].ID != cmdQueue || items[3].Label != "Save to Liked Songs" || items[3].Disabled {
+	if len(items) != 8 || items[0].ID != cmdPlayTrack || items[1].ID != cmdQueue || items[3].Label != "Save to Liked Songs" || items[3].Disabled {
 		t.Fatalf("menu %+v", items)
 	}
 	if ep := ContextMenu(d.State(), idTracks+":2"); !ep[3].Disabled {
@@ -924,5 +934,101 @@ func TestBackAndForward(t *testing.T) {
 	typeText(d, "x")
 	if len(s.forward) != 0 {
 		t.Fatalf("forward kept %v", s.forward)
+	}
+}
+
+func TestSearchReplacesPreviousQueryWhilePending(t *testing.T) {
+	d, f := ready(t)
+	f.results = map[string]spotify.Results{"over": found, "over!": {}}
+	d.Send(flatte.MenuEvent{ID: cmdSearch})
+	typeText(d, "over")
+	fr := plain(d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: '!'}))
+	if !strings.Contains(fr, "Searching…") || strings.Contains(fr, "Overture") {
+		t.Fatalf("new query retained old rows or lacked loading state:\n%s", fr)
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
+	if len(f.calls) != 0 {
+		t.Fatalf("played stale result: %v", f.calls)
+	}
+	if fr := plain(d.Settle()); !strings.Contains(fr, "Nothing found.") {
+		t.Fatalf("empty result:\n%s", fr)
+	}
+}
+
+func TestFirstSearchFailureStopsLoadingAndEnterRetries(t *testing.T) {
+	d, f := ready(t)
+	f.webFail = errors.New("offline")
+	d.Send(flatte.MenuEvent{ID: cmdSearch})
+	typeText(d, "over")
+	fr := plain(d.Frame())
+	if strings.Contains(fr, "Searching…") || !strings.Contains(fr, "Search failed.") || !strings.Contains(fr, "Could not search: offline") {
+		t.Fatalf("failed search:\n%s", fr)
+	}
+	f.webFail = nil
+	f.results = map[string]spotify.Results{"over": found}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
+	if fr := plain(d.Settle()); !strings.Contains(fr, "Overture") || strings.Contains(fr, "Search failed.") {
+		t.Fatalf("retry:\n%s", fr)
+	}
+}
+
+func TestEnterOnSearchResultsDoesNotSearchAgain(t *testing.T) {
+	d, f := ready(t)
+	f.results = map[string]spotify.Results{"over": found}
+	d.Send(flatte.MenuEvent{ID: cmdSearch})
+	typeText(d, "over")
+	f.reads = nil
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
+	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
+	d.Settle()
+	if len(f.reads) != 0 || d.State().tracks.Cursor() != 1 || d.State().focus != paneTracks {
+		t.Fatalf("Enter reloaded results: reads %v cursor %d focus %v", f.reads, d.State().tracks.Cursor(), d.State().focus)
+	}
+}
+
+func TestSearchSupersededAndClearedBeforeCompletion(t *testing.T) {
+	d, f := ready(t)
+	f.results = map[string]spotify.Results{"over": found, "over!": {}}
+	d.Send(flatte.MenuEvent{ID: cmdSearch})
+	d.Send(flatte.PasteEvent{Text: "over"})
+	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: '!'})
+	if fr := plain(d.Settle()); strings.Contains(fr, "Overture") || !strings.Contains(fr, "Nothing found.") {
+		t.Fatalf("superseded result applied:\n%s", fr)
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyBackspace})
+	for range 4 {
+		d.Send(flatte.KeyEvent{Key: flatte.KeyBackspace})
+	}
+	d.Settle()
+	if _, exists := d.State().listings[uriSearch]; exists || d.State().page == pageSearch {
+		t.Fatal("cleared query applied a pending result")
+	}
+}
+
+func TestSearchSnapshots(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fail error
+	}{{name: "search"}, {name: "search-error", fail: errors.New("offline")}} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, f := ready(t)
+			f.results, f.webFail = map[string]spotify.Results{"over": found}, tc.fail
+			d.Send(flatte.MenuEvent{ID: cmdSearch})
+			typeText(d, "over")
+			flatest.AssertGoldenFrame(t, "testdata/"+tc.name+".golden", d.Frame())
+		})
+	}
+}
+
+func TestClearingFailedSearchClearsItsError(t *testing.T) {
+	d, f := ready(t)
+	f.webFail = errors.New("offline")
+	d.Send(flatte.MenuEvent{ID: cmdSearch})
+	typeText(d, "over")
+	d.State().query.SelectAll()
+	d.Send(flatte.KeyEvent{Key: flatte.KeyBackspace})
+	if fr := plain(d.Settle()); strings.Contains(fr, "Could not search:") || d.State().status != "" || d.State().page != pageLibrary {
+		t.Fatalf("failed query left its error after clearing:\n%s", fr)
 	}
 }

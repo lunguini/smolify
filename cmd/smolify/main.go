@@ -18,6 +18,7 @@ import (
 	"github.com/lunguini/flatte/window"
 
 	"github.com/lunguini/smolify/internal/app"
+	"github.com/lunguini/smolify/internal/librarycache"
 	"github.com/lunguini/smolify/internal/player"
 	"github.com/lunguini/smolify/internal/spotify"
 )
@@ -34,7 +35,15 @@ func main() {
 		fail(err)
 	}
 	dir = filepath.Join(dir, "smolify")
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		fail(err)
+	}
+	cacheDir = filepath.Join(cacheDir, "smolify", "library")
 	if *signOut {
+		if err := librarycache.New(cacheDir).PurgeAll(); err != nil {
+			fail(err)
+		}
 		if err := player.SignOut(dir); err != nil {
 			fail(err)
 		}
@@ -67,8 +76,8 @@ func main() {
 	if *heapProfile != "" {
 		defer writeHeapProfile(*heapProfile)
 	}
-	web := &spotify.Client{Token: p.Token}
-	a := app.WithSettings(app.New(p, app.HTTPImages{}, web, debug), settingsPath, settings)
+	web := &spotify.Client{Token: p.Token, ClientToken: p.ClientToken}
+	a := app.WithCache(app.WithSettings(app.New(p, app.HTTPImages{}, web, debug), settingsPath, settings), cacheDir)
 	if *gui {
 		a = app.Windowed(a)
 		theme := app.WindowTheme()

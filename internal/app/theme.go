@@ -48,18 +48,18 @@ var (
 //go:embed images/logo.png
 var logoPNG []byte
 
-// logo is Smolify's logo, shrunk once to the size the top bar draws it at
-// (2× for Retina).
+// logo retains enough pixels for the loading screen and sidebar at Retina scale.
 var logo = sync.OnceValue(func() image.Image {
 	im, _, err := image.Decode(bytes.NewReader(logoPNG))
 	if err != nil {
 		return nil
 	}
-	return shrink(im, 2*logoPoints)
+	return shrink(im, 2*loadingLogoPoints)
 })
 
 // logoPoints is the logo's size in the top bar.
 const logoPoints = 28
+const loadingLogoPoints = 96
 
 // WindowFonts are the font files a window needs for WindowTheme.
 func WindowFonts() [][]byte { return [][]byte{interRegular, interBold} }

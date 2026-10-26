@@ -39,7 +39,7 @@ func (p *Player) RecentlyPlayed(ctx context.Context, username string, limit int)
 	if err != nil {
 		return nil, err
 	}
-	ct, err := p.clientToken(ctx)
+	ct, err := p.ClientToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -88,9 +88,9 @@ func parseRecent(r io.Reader) ([]Played, error) {
 
 var httpClient = &http.Client{Timeout: 20 * time.Second}
 
-// clientToken is a client token for this device, asked for as go-librespot
+// ClientToken is a client token for this device, asked for as go-librespot
 // asks for its own, and kept until it expires.
-func (p *Player) clientToken(ctx context.Context) (string, error) {
+func (p *Player) ClientToken(ctx context.Context) (string, error) {
 	p.ctMu.Lock()
 	defer p.ctMu.Unlock()
 	if p.ct != "" && time.Now().Before(p.ctUntil) {

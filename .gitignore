@@ -2,3 +2,6 @@
 .DS_Store
 .idea/
 /smolify
+
+/go.work
+/go.work.sum

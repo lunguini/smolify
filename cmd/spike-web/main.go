@@ -70,13 +70,30 @@ func main() {
 	type probe struct {
 		name, method, url, body string
 		clientToken, agent      bool
+		headers                 map[string]string
 	}
 	var probes []probe
-	for _, country := range []string{"US", "RO", "GB", "DE"} {
-		for _, host := range []string{spclient, "spclient.wg.spotify.com"} {
-			u := "https://" + host + "/searchview/km/v4/search/" + esc + "?entityVersion=2&limit=3&imageSize=large&catalogue=premium&country=" + country + "&locale=en&username=" + user
-			probes = append(probes, probe{"searchview v4 " + host + " country " + country, "GET", u, "", true, true})
-		}
+	_, _ = esc, user
+	// Pathfinder v2 searchDesktop as librespot's pathfinder_query asks it,
+	// with the user agent naming the OS we run on.
+	desktop := map[string]string{
+		"App-Platform":        "Win32_x86_64",
+		"Spotify-App-Version": "1.2.52.442",
+		"User-Agent":          "Spotify/124200290 OSX/0 (librespot)",
+		"Content-Type":        "application/json;charset=UTF-8",
+	}
+	for _, hash := range []string{
+		"eef7cc54888d91bdd6802623477873caa3948ae173a0c34fd86827b267e94c03",
+		"fcad5a3e0d5af727fb76966f06971c19cfa2275e6ff7671196753e008611873c",
+	} {
+		body, _ := json.Marshal(map[string]any{
+			"operationName": "searchDesktop",
+			"variables": map[string]any{"searchTerm": *q, "offset": 0, "limit": 5, "numberOfTopResults": 5,
+				"includeAudiobooks": false, "includeArtistHasConcertsField": false, "includePreReleases": false,
+				"includeLocalConcertsField": false, "includeAuthors": false},
+			"extensions": map[string]any{"persistedQuery": map[string]any{"version": 1, "sha256Hash": hash}},
+		})
+		probes = append(probes, probe{"pathfinder v2 searchDesktop " + hash[:8], "POST", "https://api-partner.spotify.com/pathfinder/v2/query", string(body), true, false, desktop})
 	}
 	hc := &http.Client{Timeout: 20 * time.Second}
 	for _, pr := range probes {
@@ -96,6 +113,9 @@ func main() {
 		}
 		if pr.body != "" {
 			req.Header.Set("Content-Type", "application/json")
+		}
+		for k, v := range pr.headers {
+			req.Header.Set(k, v)
 		}
 		resp, err := hc.Do(req)
 		if err != nil {

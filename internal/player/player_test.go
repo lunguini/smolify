@@ -21,6 +21,7 @@ func TestEventOf(t *testing.T) {
 			Uri: "spotify:track:1", Name: "Song", ArtistNames: []string{"A", "B"}, AlbumName: "Album",
 			AlbumCoverUrl: &cover, Duration: 185000, Position: 1500,
 		}}, nil},
+		{&daemon.ApiEvent{Type: daemon.ApiEventTypeWillPlay, Data: daemon.ApiEventDataWillPlay{Uri: "u", ContextUri: "c"}}, WillPlay{URI: "u", ContextURI: "c"}},
 		{&daemon.ApiEvent{Type: daemon.ApiEventTypePlaying, Data: daemon.ApiEventDataPlaying{Uri: "u", ContextUri: "c"}}, Playing{URI: "u", ContextURI: "c"}},
 		{&daemon.ApiEvent{Type: daemon.ApiEventTypePaused, Data: daemon.ApiEventDataPaused{Uri: "u"}}, Paused{URI: "u"}},
 		{&daemon.ApiEvent{Type: daemon.ApiEventTypeStopped, Data: daemon.ApiEventDataStopped{}}, Stopped{}},

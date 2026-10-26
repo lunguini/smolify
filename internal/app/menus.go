@@ -19,11 +19,12 @@ func char(r rune, mod flatte.Mod) flatte.KeyEvent {
 // search field has focus, plain keys type: only chords stay shortcuts.
 func Menus(s *State) []flatte.Menu {
 	_, hasPlaylist := s.selected()
+	source, _ := playbackSource(s)
 	noTrack := s.track == nil
 	song := !noTrack && strings.HasPrefix(s.track.URI, "spotify:track:")
 	liked := !noTrack && s.liked[s.track.URI]
 	keys := func(ks ...flatte.KeyEvent) []flatte.KeyEvent {
-		if !s.typing() {
+		if !s.typing() && s.focus != paneSort && !s.trackSort.IsOpen() {
 			return ks
 		}
 		// Only chords stay, and not the ones a field edits with (⌘← moves
@@ -38,7 +39,7 @@ func Menus(s *State) []flatte.Menu {
 	}
 	return []flatte.Menu{
 		{Title: "Playback", Items: []flatte.MenuItem{
-			{ID: cmdPlayPause, Label: playLabel(s), Keys: keys(char(' ', 0)), Disabled: noTrack && !hasPlaylist},
+			{ID: cmdPlayPause, Label: playLabel(s), Keys: keys(char(' ', 0)), Disabled: loadingPlay(s) || noTrack && !hasPlaylist},
 			{ID: cmdNext, Label: "Next", Keys: keys(key(flatte.KeyRight, flatte.ModSuper), key(flatte.KeyRight, flatte.ModCtrl), char('n', 0)), Disabled: noTrack},
 			{ID: cmdPrev, Label: "Previous", Keys: keys(key(flatte.KeyLeft, flatte.ModSuper), key(flatte.KeyLeft, flatte.ModCtrl), char('p', 0)), Disabled: noTrack},
 			{Separator: true},
@@ -57,17 +58,23 @@ func Menus(s *State) []flatte.Menu {
 			{ID: cmdBack, Label: "Back", Keys: keys(char('[', flatte.ModSuper), key(flatte.KeyLeft, flatte.ModAlt)), Disabled: len(s.back) == 0},
 			{ID: cmdForward, Label: "Forward", Keys: keys(char(']', flatte.ModSuper), key(flatte.KeyRight, flatte.ModAlt)), Disabled: len(s.forward) == 0},
 			{Separator: true},
+			{ID: cmdPlaybackSource, Label: "Current Playback Source", Disabled: source.URI == ""},
 			{ID: cmdHome, Label: "Home", Checked: s.page == pageHome, Keys: keys(char('h', 0), char('1', flatte.ModSuper))},
 			{ID: cmdSearch, Label: "Search", Checked: s.page == pageSearch, Keys: keys(char('/', 0), char('f', flatte.ModSuper), char('f', flatte.ModCtrl)), Disabled: s.web == nil},
 			{ID: cmdSettings, Label: "Settings", Checked: s.page == pageSettings, Keys: keys(char(',', flatte.ModSuper), char(',', flatte.ModCtrl))},
 		}},
 		{Title: "View", Items: []flatte.MenuItem{
+			{ID: cmdTrackFilter, Label: "Find in Playlist", Keys: keys(char('f', flatte.ModSuper|flatte.ModShift), char('f', flatte.ModCtrl|flatte.ModShift)), Disabled: (s.page != pageLibrary && s.page != pageBrowse) || !hasPlaylist},
+			{ID: cmdSort, Label: "Sort Songs", Keys: keys(char('o', 0)), Disabled: (s.page != pageLibrary && s.page != pageBrowse) || !hasPlaylist},
 			{ID: cmdCompact, Label: "Compact Rows", Checked: s.compact, Keys: keys(char('d', 0))},
 		}},
 	}
 }
 
 func playLabel(s *State) string {
+	if loadingPlay(s) {
+		return "Loading…"
+	}
 	if s.playing {
 		return "Pause"
 	}
@@ -85,7 +92,7 @@ func ContextMenu(s *State, target string) []flatte.MenuItem {
 		return []flatte.MenuItem{{ID: cmdPlayList, Label: "Play “" + lib[i].Name + "”"}}
 	}
 	i, ok := rowIndex(idTracks, target)
-	l := s.listings[s.shown]
+	l := displayListing(s, s.listings[s.shown])
 	if !ok || i >= len(l.Tracks) {
 		return nil
 	}
@@ -96,6 +103,10 @@ func ContextMenu(s *State, target string) []flatte.MenuItem {
 		{ID: cmdQueue, Label: "Add to Queue"},
 		{Separator: true},
 		{ID: cmdLikeTrack, Label: likeLabel(s.liked[t.URI]), Disabled: !song},
+		{Separator: true},
+		{ID: "open-track-album", Label: "Go to Album", Disabled: t.AlbumURI == ""},
+		{ID: "open-track-artist", Label: "Go to Artist", Disabled: len(t.ArtistURIs) == 0},
+		{ID: "song-radio", Label: "Song Radio", Disabled: !song},
 	}
 }
 

@@ -55,24 +55,57 @@ func (a Audio) bitrate() int {
 
 // Player is the embedded player. Its methods may be called from any
 // goroutine; they block until the player answers (or ctx ends). Requests
-// go through srv, which outlives the go-librespot session behind it, so a
-// restart (Configure, SignOut) is invisible to callers but for the wait.
+// are bound to one session, wait for sign-in, and end when that session
+// exits or the caller cancels its context.
 type Player struct {
-	srv    *server
 	events chan Event
-	ctx    context.Context // Start's, which every session runs under
+	ctx    context.Context
 
-	mu     sync.Mutex // guards the session fields below
-	opts   Options
-	app    *daemon.App
-	cancel context.CancelFunc
-	done   chan struct{}
-	closed bool
+	mu               sync.Mutex
+	ops              sync.Mutex // serializes Configure and SignOut; Close never waits on it
+	opts             Options
+	session          *playerSession
+	closed           bool
+	operation        context.CancelFunc
+	newApp           func(*daemon.Options) (sessionApp, error)
+	clearCredentials func(string) error
 
-	// ct is a client token for RecentlyPlayed, good until ctUntil.
 	ctMu    sync.Mutex
 	ct      string
 	ctUntil time.Time
+}
+
+type sessionApp interface {
+	Run(context.Context) error
+}
+
+type playerSession struct {
+	srv       *server
+	ctx       context.Context
+	cancel    context.CancelFunc
+	done      chan struct{}
+	ready     chan struct{}
+	readyOnce sync.Once
+	stopOnce  sync.Once
+	stopped   chan struct{}
+	stopErr   error
+}
+
+// stop cancels all requests immediately, then waits a bounded time for Run.
+func (s *playerSession) stop() error {
+	s.cancel()
+	s.stopOnce.Do(func() {
+		// App.Run owns App.Close on cancellation. Waiting for Run also avoids
+		// calling the daemon's unsynchronized Close concurrently with it.
+		select {
+		case <-s.done:
+		case <-time.After(3 * time.Second):
+			s.stopErr = errors.New("player: session did not stop")
+		}
+		close(s.stopped)
+	})
+	<-s.stopped
+	return s.stopErr
 }
 
 // dir is the player's state dir.
@@ -93,7 +126,6 @@ func Start(ctx context.Context, opts Options) (*Player, error) {
 	// writes would land on the terminal frame.
 	logrus.SetOutput(io.Discard)
 	p := &Player{events: make(chan Event, 256), ctx: ctx, opts: opts}
-	p.srv = &server{requests: make(chan daemon.ApiRequest), emit: p.emit}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err := p.launch(); err != nil {
@@ -104,15 +136,36 @@ func Start(ctx context.Context, opts Options) (*Player, error) {
 
 // launch starts a session with p.opts. Callers hold p.mu.
 func (p *Player) launch() error {
+	if p.closed {
+		return errors.New("player: closed")
+	}
 	opts := p.opts
 	vol := opts.Volume
 	if vol <= 0 {
 		vol = 40
 	}
-	app, err := daemon.New(&daemon.Options{
+	ctx, cancel := context.WithCancel(p.ctx)
+	session := &playerSession{ctx: ctx, cancel: cancel, done: make(chan struct{}), ready: make(chan struct{}), stopped: make(chan struct{})}
+	session.srv = &server{requests: make(chan daemon.ApiRequest)}
+	session.srv.emit = func(e Event) {
+		if _, ok := e.(Ready); ok {
+			session.readyOnce.Do(func() { close(session.ready) })
+		}
+		p.mu.Lock()
+		current := p.session == session && !p.closed && session.ctx.Err() == nil
+		if current {
+			p.emit(e)
+		}
+		p.mu.Unlock()
+	}
+	newApp := p.newApp
+	if newApp == nil {
+		newApp = func(o *daemon.Options) (sessionApp, error) { return daemon.New(o) }
+	}
+	app, err := newApp(&daemon.Options{
 		Logger:     quietLogger{},
 		StateStore: fileStore{dir: opts.Dir},
-		APIServer:  p.srv,
+		APIServer:  session.srv,
 		Config: &daemon.Config{
 			DeviceName:            opts.DeviceName,
 			DeviceType:            "computer",
@@ -130,29 +183,18 @@ func (p *Player) launch() error {
 		},
 	})
 	if err != nil {
+		cancel()
 		return err
 	}
-	ctx, cancel := context.WithCancel(p.ctx)
-	done := make(chan struct{})
-	p.app, p.cancel, p.done = app, cancel, done
+	p.session = session
 	go func() {
-		defer close(done)
+		defer close(session.done)
+		defer cancel()
 		if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			p.emit(Failed{Err: err})
+			session.srv.emit(Failed{Err: err})
 		}
 	}()
 	return nil
-}
-
-// stop ends the running session and waits for it (a few seconds at most).
-// Callers hold p.mu.
-func (p *Player) stop() {
-	p.cancel()
-	_ = p.app.Close()
-	select {
-	case <-p.done:
-	case <-time.After(3 * time.Second):
-	}
 }
 
 // Events delivers the player's events, in order. It is never closed.
@@ -170,52 +212,113 @@ func (p *Player) emit(ev Event) {
 // Close stops the player.
 func (p *Player) Close() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if !p.closed {
-		p.closed = true
-		p.stop()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.closed = true
+	if p.operation != nil {
+		p.operation()
+	}
+	session := p.session
+	p.mu.Unlock()
+	if session != nil {
+		_ = session.stop()
 	}
 }
 
-// Configure changes how the player plays. A change restarts the session
-// and then picks up where it was: the same track of the same list at the
-// same position, playing or paused as before. No change does nothing.
+// Configure restarts the session and restores playback after sign-in.
 func (p *Player) Configure(ctx context.Context, a Audio) error {
+	p.ops.Lock()
+	defer p.ops.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	p.mu.Lock()
 	if p.closed || p.opts.Audio == a {
 		p.mu.Unlock()
 		return nil
 	}
-	st, statusErr := p.Status(ctx)
+	op, cancel := context.WithTimeout(ctx, 30*time.Second)
+	p.operation = cancel
+	previous := p.session
+	p.mu.Unlock()
+	defer cancel()
+	defer func() { p.mu.Lock(); p.operation = nil; p.mu.Unlock() }()
+
+	statusCtx, statusCancel := context.WithTimeout(op, 3*time.Second)
+	v, statusErr := previous.request(statusCtx, daemon.ApiRequestTypeStatus, nil)
+	statusCancel()
+	var st Status
+	if statusErr == nil {
+		st, statusErr = statusOf(v)
+	}
+	if err := op.Err(); err != nil {
+		return err
+	}
+	if err := previous.stop(); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	if err := op.Err(); err != nil {
+		// Cancellation may land while the old session is stopping. Keep the
+		// device alive even when there is no following Configure to replace it.
+		restartErr := p.launch()
+		p.mu.Unlock()
+		return errors.Join(err, restartErr)
+	}
+	previousAudio := p.opts.Audio
 	p.opts.Audio = a
-	p.stop()
 	err := p.launch()
+	if err != nil {
+		p.opts.Audio = previousAudio
+	}
+	next := p.session
 	p.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	if statusErr != nil || st.Track == nil || st.Stopped {
-		return nil
-	}
-	return p.resume(ctx, st)
-}
-
-// resume plays st's track again where it was, paused if it was.
-func (p *Player) resume(ctx context.Context, st Status) error {
-	list := st.ContextURI
-	if list == "" {
-		list = st.Track.URI
-	}
-	if err := p.Play(ctx, list, st.Track.URI); err != nil {
+	// Even an idle restart waits for readiness, so subsequent settings
+	// changes cannot race the new session's sign-in.
+	if err := next.waitReady(op); err != nil {
 		return err
 	}
-	if st.Track.Position > 0 {
-		if err := p.Seek(ctx, st.Track.Position); err != nil {
+	if statusErr != nil {
+		return nil
+	}
+	return next.resume(op, st)
+}
+
+// resume restores controls even when playback was stopped. Requests stay
+// bound to this session, so a later restart cannot receive stale commands.
+func (s *playerSession) resume(ctx context.Context, st Status) error {
+	request := func(t daemon.ApiRequestType, data any) error { _, err := s.request(ctx, t, data); return err }
+	if err := request(daemon.ApiRequestTypeSetVolume, daemon.ApiSetVolume{Volume: int32(max(st.Volume, 0))}); err != nil {
+		return err
+	}
+	playing := st.Track != nil && !st.Stopped
+	if playing {
+		list := st.ContextURI
+		if list == "" {
+			list = st.Track.URI
+		}
+		if err := request(daemon.ApiRequestTypePlay, daemon.ApiPlay{
+			Uri: list, SkipToUri: st.Track.URI, Position: st.Track.Position.Milliseconds(), Paused: st.Paused,
+		}); err != nil {
 			return err
 		}
 	}
-	if st.Paused {
-		return p.PlayPause(ctx)
+	for _, r := range []struct {
+		t  daemon.ApiRequestType
+		on bool
+	}{
+		{daemon.ApiRequestTypeSetShufflingContext, st.Shuffle},
+		{daemon.ApiRequestTypeSetRepeatingContext, st.Repeat.Context},
+		{daemon.ApiRequestTypeSetRepeatingTrack, st.Repeat.Track},
+	} {
+		if err := request(r.t, r.on); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -233,16 +336,50 @@ func (p *Player) SetDeviceName(ctx context.Context, name string) error {
 // SignOut forgets the stored sign-in and restarts the session, which then
 // reports Pairing as on first launch.
 func (p *Player) SignOut(ctx context.Context) error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.closed {
-		return nil
-	}
-	p.stop()
-	if err := SignOut(p.opts.Dir); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return p.launch()
+	// A pending Configure can be waiting for sign-in; interrupt it before
+	// waiting for the lifecycle slot, just as Close does.
+	p.mu.Lock()
+	if p.operation != nil {
+		p.operation()
+	}
+	p.mu.Unlock()
+	p.ops.Lock()
+	defer p.ops.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
+	previous, dir := p.session, p.opts.Dir
+	clear := p.clearCredentials
+	p.mu.Unlock()
+	if err := previous.stop(); err != nil {
+		return err
+	}
+	if clear == nil {
+		clear = SignOut
+	}
+	clearErr := clear(dir)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// Whether clearing succeeded or failed, bring a session back. On a
+	// failure it can reuse the old credentials instead of leaving silence.
+	for {
+		select {
+		case <-p.events:
+			continue
+		default:
+			goto drained
+		}
+	}
+drained:
+	return errors.Join(clearErr, p.launch())
 }
 
 // ErrSuperseded reports a command a newer one replaced before it ran: the
@@ -251,13 +388,44 @@ var ErrSuperseded = daemon.ErrSuperseded
 
 // request sends one request and waits for its reply.
 func (p *Player) request(ctx context.Context, t daemon.ApiRequestType, data any) (any, error) {
+	p.mu.Lock()
+	session, closed := p.session, p.closed
+	p.mu.Unlock()
+	if closed || session == nil {
+		return nil, errors.New("player: closed")
+	}
+	return session.request(ctx, t, data)
+}
+
+func (s *playerSession) waitReady(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.ctx.Done():
+		return errors.New("player: session ended")
+	case <-s.ready:
+		if s.ctx.Err() != nil {
+			return errors.New("player: session ended")
+		}
+		return nil
+	}
+}
+
+func (s *playerSession) request(ctx context.Context, t daemon.ApiRequestType, data any) (any, error) {
+	if err := s.waitReady(ctx); err != nil {
+		return nil, err
+	}
+	requestCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
+	defer cancel()
 	req, wait := daemon.NewApiRequest(t, data)
 	select {
-	case p.srv.requests <- req:
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	case <-requestCtx.Done():
+		return nil, requestCtx.Err()
+	case s.srv.requests <- req:
 	}
-	return wait(ctx)
+	return wait(requestCtx)
 }
 
 // Status is the player's state now.
@@ -276,6 +444,10 @@ func (p *Player) Status(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	return statusOf(v)
+}
+
+func statusOf(v any) (Status, error) {
 	s, ok := v.(*daemon.ApiStatus)
 	if !ok {
 		return Status{}, fmt.Errorf("player: unexpected status %T", v)

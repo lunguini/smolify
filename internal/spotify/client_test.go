@@ -2,15 +2,17 @@ package spotify
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-// server answers the Web API paths in routes, recording the tokens used.
+// server answers the search requests in routes, recording the tokens used.
 func server(t *testing.T, routes map[string]string, valid string) (*Client, *[]string, *int) {
 	t.Helper()
 	var tokens []string
@@ -32,7 +34,7 @@ func server(t *testing.T, routes map[string]string, valid string) (*Client, *[]s
 	}))
 	t.Cleanup(srv.Close)
 	next := []string{"stale", valid, valid}
-	c := &Client{Base: srv.URL, HTTP: srv.Client(), Token: func(context.Context) (string, error) {
+	c := &Client{Base: srv.URL, ClientToken: func(context.Context) (string, error) { return "client", nil }, HTTP: srv.Client(), Token: func(context.Context) (string, error) {
 		tok := next[min(asked, len(next)-1)]
 		asked++
 		return tok, nil
@@ -40,17 +42,16 @@ func server(t *testing.T, routes map[string]string, valid string) (*Client, *[]s
 	return c, &tokens, &asked
 }
 
-const searchBody = `{
- "tracks": {"items": [{"uri": "spotify:track:1", "name": "Overthink", "duration_ms": 200000,
-   "artists": [{"uri": "spotify:artist:k", "name": "Kuo"}],
-   "album": {"uri": "spotify:album:t", "name": "Thinking", "images": [{"url": "big", "width": 640}, {"url": "small", "width": 64}, {"url": "mid", "width": 300}]}}]},
- "albums": {"items": [{"uri": "spotify:album:t", "name": "Thinking"}]},
- "artists": {"items": [{"uri": "spotify:artist:k", "name": "Kuo"}]},
- "playlists": {"items": [null, {"uri": "spotify:playlist:p", "name": "Mix", "owner": {"display_name": "Spotify"}}]}
-}`
+var searchBody = func() string {
+	b, err := os.ReadFile("testdata/search.json")
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}()
 
 func TestSearchRetriesARejectedToken(t *testing.T) {
-	c, tokens, asked := server(t, map[string]string{"/search": searchBody}, "good")
+	c, tokens, asked := server(t, map[string]string{"/": searchBody}, "good")
 	r, err := c.Search(context.Background(), "  over ", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +72,7 @@ func TestSearchRetriesARejectedToken(t *testing.T) {
 }
 
 func TestTokenExpires(t *testing.T) {
-	c, _, asked := server(t, map[string]string{"/search": `{}`}, "good")
+	c, _, asked := server(t, map[string]string{"/": `{}`}, "good")
 	c.Token = func(context.Context) (string, error) { *asked++; return "good", nil }
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	c.Now = func() time.Time { return now }
@@ -89,7 +90,7 @@ func TestErrors(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 	}))
 	defer srv.Close()
-	c := &Client{Base: srv.URL, Token: func(context.Context) (string, error) { return "t", nil }}
+	c := &Client{Base: srv.URL, ClientToken: func(context.Context) (string, error) { return "client", nil }, Token: func(context.Context) (string, error) { return "t", nil }}
 	_, err := c.Search(context.Background(), "x", 1)
 	var e Error
 	if !errors.As(err, &e) || e.Status != 429 || err.Error() != "Spotify is rate limiting; try again in 7s" {
@@ -98,7 +99,7 @@ func TestErrors(t *testing.T) {
 	if (Error{Status: 403, Message: "Insufficient client scope"}).Error() != "Spotify: Insufficient client scope (403)" {
 		t.Fatal((Error{Status: 403, Message: "Insufficient client scope"}).Error())
 	}
-	c = &Client{Base: srv.URL, Token: func(context.Context) (string, error) { return "", errors.New("not signed in") }}
+	c = &Client{Base: srv.URL, ClientToken: func(context.Context) (string, error) { return "client", nil }, Token: func(context.Context) (string, error) { return "", errors.New("not signed in") }}
 	if _, err := c.Search(context.Background(), "x", 1); err == nil || err.Error() != "not signed in" {
 		t.Fatalf("token failure: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestRateLimitHoldsRequests(t *testing.T) {
 	}))
 	defer srv.Close()
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	c := &Client{Base: srv.URL, Now: func() time.Time { return now }, Token: func(context.Context) (string, error) { return "t", nil }}
+	c := &Client{Base: srv.URL, ClientToken: func(context.Context) (string, error) { return "client", nil }, Now: func() time.Time { return now }, Token: func(context.Context) (string, error) { return "t", nil }}
 	c.Search(context.Background(), "a", 1)
 	now = now.Add(100 * time.Second)
 	_, err := c.Search(context.Background(), "ab", 1)
@@ -137,4 +138,175 @@ func TestRateLimitHoldsRequests(t *testing.T) {
 	if hits != 2 {
 		t.Fatalf("hits %d after the limit ended", hits)
 	}
+}
+
+func TestSearchRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.Header.Get("Client-Token") != "client" || r.Header.Get("User-Agent") != "Spotify/124200290 OSX/0 (librespot)" || r.Header.Get("App-Platform") != "Win32_x86_64" || r.Header.Get("Spotify-App-Version") != "1.2.52.442" || r.Header.Get("Content-Type") != "application/json;charset=UTF-8" {
+			t.Errorf("request %s headers %v", r.Method, r.Header)
+		}
+		var body struct {
+			OperationName string
+			Variables     struct {
+				SearchTerm    string
+				Limit, Offset int
+			}
+			Extensions struct {
+				PersistedQuery struct {
+					Version    int
+					SHA256Hash string
+				}
+			}
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.OperationName != "searchDesktop" || body.Variables.SearchTerm != `Björk & "live"` || body.Variables.Limit != 30 || body.Variables.Offset != 0 || body.Extensions.PersistedQuery.Version != 1 || body.Extensions.PersistedQuery.SHA256Hash != "eef7cc54888d91bdd6802623477873caa3948ae173a0c34fd86827b267e94c03" {
+			t.Errorf("body %+v", body)
+		}
+		w.Write([]byte(searchBody))
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, Token: func(context.Context) (string, error) { return "access", nil }, ClientToken: func(context.Context) (string, error) { return "client", nil }}
+	if _, err := c.Search(context.Background(), `  Björk & "live"  `, 30); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchInvalidResponses(t *testing.T) {
+	for _, body := range []string{`{`, `{}`, `{"data":null}`, `{"errors":[{"message":"PersistedQueryNotFound"}]}`, `{"data":{"searchV2":null},"errors":[{"message":"rejected"}]}`} {
+		t.Run(body, func(t *testing.T) {
+			c, _, _ := server(t, map[string]string{"/": body}, "good")
+			if _, err := c.Search(context.Background(), "x", 5); err == nil {
+				t.Fatal("invalid response accepted")
+			}
+		})
+	}
+	c := &Client{Token: func(context.Context) (string, error) { t.Fatal("blank search requested token"); return "", nil }}
+	if _, err := c.Search(context.Background(), "  ", 30); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchCancellation(t *testing.T) {
+	c, _, _ := server(t, map[string]string{"/": searchBody}, "good")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.Search(ctx, "over", 30); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled search: %v", err)
+	}
+}
+
+func TestSearchAuthFailures(t *testing.T) {
+	t.Run("client token failure", func(t *testing.T) {
+		c, _, _ := server(t, map[string]string{"/": searchBody}, "good")
+		c.ClientToken = func(context.Context) (string, error) { return "", errors.New("client token unavailable") }
+		if _, err := c.Search(context.Background(), "over", 30); err == nil || err.Error() != "client token unavailable" {
+			t.Fatalf("err %v", err)
+		}
+	})
+	t.Run("missing client token source", func(t *testing.T) {
+		c, _, _ := server(t, map[string]string{"/": searchBody}, "good")
+		c.ClientToken = nil
+		if _, err := c.Search(context.Background(), "over", 30); err == nil || err.Error() != "spotify: no client token source" {
+			t.Fatalf("err %v", err)
+		}
+	})
+	t.Run("rejection retries only once", func(t *testing.T) {
+		c, tokens, asked := server(t, map[string]string{"/": searchBody}, "never-valid")
+		c.Token = func(context.Context) (string, error) { *asked++; return "rejected", nil }
+		_, err := c.Search(context.Background(), "over", 30)
+		var e Error
+		if !errors.As(err, &e) || e.Status != 401 || *asked != 2 || len(*tokens) != 2 {
+			t.Fatalf("err %v asked %d tokens %v", err, *asked, *tokens)
+		}
+	})
+}
+
+func TestResetClearsAccountTokenAndRejectsLateToken(t *testing.T) {
+	c := &Client{}
+	c.Token = func(context.Context) (string, error) { return "old", nil }
+	if _, err := c.accessToken(context.Background(), false, c.generation()); err != nil {
+		t.Fatal(err)
+	}
+	c.limit("100")
+	c.Reset()
+	c.Token = func(context.Context) (string, error) { return "new", nil }
+	tok, err := c.accessToken(context.Background(), false, c.generation())
+	if err != nil || tok != "new" || c.limited() != nil {
+		t.Fatalf("token %q err %v limit %v", tok, err, c.limited())
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	c.Token = func(context.Context) (string, error) { close(started); <-release; return "late-old", nil }
+	done := make(chan error, 1)
+	go func() { _, err := c.accessToken(context.Background(), true, c.generation()); done <- err }()
+	<-started
+	c.Reset()
+	close(release)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("late token err %v", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.token != "" {
+		t.Fatalf("old token restored after reset: %q", c.token)
+	}
+}
+
+func TestResetRejectsLateSearchResponse(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Retry-After", "120")
+		w.WriteHeader(429)
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, Token: func(context.Context) (string, error) { return "old", nil }, ClientToken: func(context.Context) (string, error) { return "client", nil }}
+	done := make(chan error, 1)
+	go func() { _, err := c.Search(context.Background(), "old", 30); done <- err }()
+	<-started
+	c.Reset()
+	close(release)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("late search err %v", err)
+	}
+	if err := c.limited(); err != nil {
+		t.Fatalf("old response restored cooldown: %v", err)
+	}
+}
+
+func TestAccessTokenRejectsResetBetweenRequestAndTokenAcquisition(t *testing.T) {
+	c := &Client{Token: func(context.Context) (string, error) { t.Fatal("stale request called token source"); return "old", nil }}
+	epoch := c.generation()
+	c.Reset()
+	if _, err := c.accessToken(context.Background(), false, epoch); !errors.Is(err, context.Canceled) {
+		t.Fatalf("stale token acquisition: %v", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.token != "" {
+		t.Fatalf("stale request cached token %q", c.token)
+	}
+}
+
+func TestAccessTokenRejectsCancellationBeforeSourceAndCaching(t *testing.T) {
+	t.Run("before source", func(t *testing.T) {
+		c := &Client{Token: func(context.Context) (string, error) { t.Fatal("canceled request called source"); return "", nil }}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := c.accessToken(ctx, false, c.generation()); !errors.Is(err, context.Canceled) {
+			t.Fatalf("err %v", err)
+		}
+	})
+	t.Run("before cache", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		c := &Client{Token: func(context.Context) (string, error) { cancel(); return "ignored-cancellation", nil }}
+		if _, err := c.accessToken(ctx, false, c.generation()); !errors.Is(err, context.Canceled) {
+			t.Fatalf("err %v", err)
+		}
+		if c.token != "" {
+			t.Fatalf("canceled result cached %q", c.token)
+		}
+	})
 }

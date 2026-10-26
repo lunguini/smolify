@@ -25,18 +25,21 @@ type Track struct {
 	Artists           []string
 	ArtistURIs        []string
 	Album, AlbumURI   string
-	Cover             string // cover image URL ("": none)
+	Cover             string    // cover image URL ("": none)
+	AddedAt           time.Time // Liked Songs timestamp; zero when unavailable.
 	Duration          time.Duration
 	Position          time.Duration
 	ContextURI        string
 	TrackNumber, Disc int
 }
 
-// Playing, Paused, and Stopped report the playback state.
+// WillPlay identifies the track the player is about to load. Playing,
+// Paused, and Stopped report the actual playback state.
 type (
-	Playing struct{ URI, ContextURI string }
-	Paused  struct{ URI, ContextURI string }
-	Stopped struct{}
+	WillPlay struct{ URI, ContextURI string }
+	Playing  struct{ URI, ContextURI string }
+	Paused   struct{ URI, ContextURI string }
+	Stopped  struct{}
 )
 
 // Seek reports a new position in the track.
@@ -63,6 +66,7 @@ type Failed struct{ Err error }
 func (Pairing) isEvent()       {}
 func (Ready) isEvent()         {}
 func (Track) isEvent()         {}
+func (WillPlay) isEvent()      {}
 func (Playing) isEvent()       {}
 func (Paused) isEvent()        {}
 func (Stopped) isEvent()       {}
@@ -96,6 +100,8 @@ func eventOf(ev *daemon.ApiEvent, repeat *Repeat) (Event, bool) {
 	switch d := ev.Data.(type) {
 	case daemon.ApiEventDataMetadata:
 		return trackOf(daemon.ApiTrack(d)), true
+	case daemon.ApiEventDataWillPlay:
+		return WillPlay{URI: d.Uri, ContextURI: d.ContextUri}, true
 	case daemon.ApiEventDataPlaying:
 		return Playing{URI: d.Uri, ContextURI: d.ContextUri}, true
 	case daemon.ApiEventDataPaused:

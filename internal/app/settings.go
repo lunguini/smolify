@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lunguini/flatte"
@@ -74,11 +76,39 @@ func saveSettings(path string, st Settings) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(f.Name())
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// settingsWriter serializes disk writes and skips snapshots superseded
+// before their worker starts. Revisions are assigned on the app loop.
+type settingsWriter struct {
+	path   string
+	latest atomic.Uint64
+	mu     sync.Mutex
+}
+
+func (w *settingsWriter) prepare(st Settings) func() error {
+	revision := w.latest.Add(1)
+	return func() error {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if revision != w.latest.Load() {
+			return nil
+		}
+		return saveSettings(w.path, st)
+	}
 }
 
 // WithSettings is app with settings st, saved to path as they change
@@ -86,8 +116,18 @@ func saveSettings(path string, st Settings) error {
 func WithSettings(app flatte.App[State], path string, st Settings) flatte.App[State] {
 	s := app.State
 	s.settings, s.settingsPath, s.compact = st, path, st.Compact
+	s.activeAudio = st.Audio()
+	initAudioSettings(s)
+	s.settingsWriter = &settingsWriter{path: path}
 	s.deviceName = flatui.TextField{Value: st.DeviceName, Cursor: len(st.DeviceName)}
 	return app
+}
+
+func initAudioSettings(s *State) {
+	s.settingQuality.SetOptions([]string{"Low · 96 kbps", "Normal · 160 kbps", "High · 320 kbps"})
+	s.settingQuality.Select(pickOf(qualities, s.settings.Bitrate))
+	s.settingCrossfade.SetOptions([]string{"Off", "2 seconds", "5 seconds", "10 seconds"})
+	s.settingCrossfade.Select(pickOf(crossfades, s.settings.Crossfade))
 }
 
 // The settings, as rows of the Settings page: one ID each, clicked or
@@ -99,13 +139,14 @@ const (
 	setNormalise    = "set:normalise"
 	setCrossfade    = "set:crossfade"
 	setAutoplay     = "set:autoplay"
+	setApplyAudio   = "set:apply-audio"
 	setDeviceName   = "set:device-name"
 	setCompact      = "set:compact"
 	setSignOut      = "set:sign-out"
 )
 
 // settingIDs are the rows in page order.
-var settingIDs = []string{setNotifyErrors, setNotifyTracks, setQuality, setNormalise, setCrossfade, setAutoplay, setDeviceName, setCompact, setSignOut}
+var settingIDs = []string{setNotifyErrors, setNotifyTracks, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setDeviceName, setCompact, setSignOut}
 
 // The choices of the two multi-way settings, in order.
 var (
@@ -147,6 +188,9 @@ func changeSetting(s *State, id string, step int) {
 		st.Bitrate = qualities[wrap(pickOf(qualities, st.Bitrate)+step, len(qualities))].value
 	case setCrossfade:
 		st.Crossfade = crossfades[wrap(pickOf(crossfades, st.Crossfade)+step, len(crossfades))].value
+	case setApplyAudio:
+		applyAudioSettings(s)
+		return
 	case setDeviceName:
 		s.focus = paneDevice
 		return
@@ -173,25 +217,49 @@ func chooseSetting(s *State, id string, n int) {
 	applySettings(s, st)
 }
 
+func applyAudioSettings(s *State) {
+	want := s.settings.Audio()
+	if want == s.activeAudio || s.applyingAudio {
+		return
+	}
+	s.applyingAudio = true
+	be := s.be
+	accountLatest(s, "apply-audio", func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, be.Configure(ctx, want)
+	}, func(s *State, _ struct{}, err error) {
+		s.applyingAudio = false
+		if err != nil {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, player.ErrSuperseded) {
+				fail(s, "Could not apply audio settings: "+err.Error())
+			}
+			return
+		}
+		s.activeAudio = want
+		s.notice = "Audio settings applied"
+	})
+}
+
 func wrap(i, n int) int { return ((i % n) + n) % n }
 
 // applySettings makes st the settings: saved, and passed on to whatever
-// they control — the rows at once, the player (restarting its session) when
-// the audio changed, its Connect name when that did.
+// they control. Audio options are startup-only in go-librespot, so they are
+// persisted for the next player session instead of restarting active playback.
 func applySettings(s *State, st Settings) {
 	old := s.settings
 	s.settings, s.compact = st, st.Compact // row heights follow at the next layout
-	if st.Audio() != old.Audio() {
-		a := st.Audio()
-		send(s, "change-audio", func(ctx context.Context, be Backend) error { return be.Configure(ctx, a) })
-	}
+	s.settingQuality.Select(pickOf(qualities, st.Bitrate))
+	s.settingCrossfade.Select(pickOf(crossfades, st.Crossfade))
 	if st.DeviceName != old.DeviceName {
 		name := st.DeviceName
-		send(s, "rename-device", func(ctx context.Context, be Backend) error { return be.SetDeviceName(ctx, name) })
+		sendLatest(s, "rename-device", func(ctx context.Context, be Backend) error { return be.SetDeviceName(ctx, name) })
 	}
 	if path := s.settingsPath; path != "" {
+		if s.settingsWriter == nil {
+			s.settingsWriter = &settingsWriter{path: path}
+		}
+		save := s.settingsWriter.prepare(st)
 		flatte.Go(s.fx, "save-settings", func(context.Context) (struct{}, error) {
-			return struct{}{}, saveSettings(path, st)
+			return struct{}{}, save()
 		}, func(s *State, _ struct{}, err error) {
 			if err != nil {
 				fail(s, "Could not save the settings: "+err.Error())
@@ -210,9 +278,7 @@ func confirmSignOut(s *State) {
 		if button != 0 {
 			return
 		}
-		s.ready, s.loaded, s.playlists, s.track, s.playing = false, false, nil, nil, false
-		s.rail.SetCount(0)
-		s.page, s.focus = pageLibrary, paneLibrary
+		resetAccount(s)
 		send(s, "sign-out", func(ctx context.Context, be Backend) error { return be.SignOut(ctx) })
 	})
 }
@@ -230,23 +296,80 @@ func openSettings(s *State) {
 func settingsKey(s *State, k flatte.KeyEvent) bool {
 	i := max(s.settingCursor, 0)
 	switch k.Key {
-	case flatte.KeyUp:
-		s.settingCursor = max(i-1, 0)
-		revealSetting(s)
-	case flatte.KeyDown:
-		s.settingCursor = min(i+1, len(settingIDs)-1)
-		revealSetting(s)
-	case flatte.KeyLeft:
-		changeSetting(s, settingIDs[i], -1)
-	case flatte.KeyRight, flatte.KeyEnter:
+	case flatte.KeyLeft, flatte.KeyRight, flatte.KeyEnter:
+		if settingsChoiceKey(s, settingIDs[i], k.Key) {
+			return true
+		}
 		changeSetting(s, settingIDs[i], 1)
+	case flatte.KeyUp, flatte.KeyDown:
+		if settingsChoiceKey(s, settingIDs[i], k.Key) {
+			return true
+		}
+		if k.Key == flatte.KeyUp {
+			s.settingCursor = max(i-1, 0)
+		} else {
+			s.settingCursor = min(i+1, len(settingIDs)-1)
+		}
+		revealSetting(s)
 	case flatte.KeyCharacter:
 		if k.Rune != ' ' || k.Mod != 0 {
 			return false
 		}
+		if settingsChoiceKey(s, settingIDs[i], flatte.KeyEnter) {
+			return true
+		}
 		changeSetting(s, settingIDs[i], 1)
 	case flatte.KeyEscape:
+		if s.settingQuality.IsOpen() || s.settingCrossfade.IsOpen() {
+			s.settingQuality.Close()
+			s.settingCrossfade.Close()
+			return true
+		}
 		travel(s, false)
+	default:
+		return false
+	}
+	return true
+}
+
+func settingsChoiceKey(s *State, id string, key flatte.Key) bool {
+	var selectChoice *flatui.Select
+	switch id {
+	case setQuality:
+		selectChoice = &s.settingQuality
+	case setCrossfade:
+		selectChoice = &s.settingCrossfade
+	default:
+		return false
+	}
+	if key == flatte.KeyLeft || key == flatte.KeyRight {
+		if !selectChoice.IsOpen() {
+			selectChoice.Open()
+		}
+		if key == flatte.KeyLeft {
+			selectChoice.MoveUp()
+		} else {
+			selectChoice.MoveDown()
+		}
+		return true
+	}
+	if !selectChoice.IsOpen() {
+		if key == flatte.KeyEnter {
+			selectChoice.Open()
+			return true
+		}
+		return false
+	}
+	switch key {
+	case flatte.KeyUp:
+		selectChoice.MoveUp()
+	case flatte.KeyDown:
+		selectChoice.MoveDown()
+	case flatte.KeyEnter:
+		selectChoice.Confirm()
+		chooseSetting(s, id, selectChoice.Selected())
+	case flatte.KeyEscape:
+		selectChoice.Close()
 	default:
 		return false
 	}
@@ -304,35 +427,31 @@ func settingsView(s *State, g bool) layout.Node {
 	toggle := func(id string, on bool) layout.Node {
 		return layout.Toggle{NodeBase: layout.NodeBase{ID: id + ":toggle"}, Kind: layout.ToggleSwitch, Checked: on}
 	}
-	choices := func(id string, cs []choice, value int) layout.Node {
-		at := pickOf(cs, value)
-		r := layout.Row{NodeBase: layout.NodeBase{Gap: 1}, Align: layout.AlignCenter}
-		for i, c := range cs {
-			b := layout.Button{NodeBase: layout.NodeBase{ID: id + ":" + strconv.Itoa(i)}, Label: c.label, Plain: i != at}
-			if i == at {
-				b.Style = layout.TextStyle{Bg: brand, Fg: ink}
-				b.Default = true
-			}
-			r.Children = append(r.Children, b)
-		}
-		return r
-	}
 	name := s.deviceName.Layout(setDeviceName+":field", s.focus == paneDevice)
+	name.Clearable = true
 	name.W = layout.Fixed(24)
 	section := func(title string) layout.Node {
-		return layout.Col{NodeBase: layout.NodeBase{PadTop: 1, PadLeft: 1}, Children: []layout.Node{layout.Label{Text: title, Style: caption}}}
+		return layout.Col{NodeBase: layout.NodeBase{PadTop: 2, PadBottom: 1, PadLeft: 1}, Children: []layout.Node{layout.Label{Text: title, Style: caption}}}
 	}
+	applyLabel := "Apply now"
+	if s.applyingAudio {
+		applyLabel = "Applying…"
+	} else if s.settings.Audio() == s.activeAudio {
+		applyLabel = "Up to date"
+	}
+	audioDirty := s.settings.Audio() != s.activeAudio
 	body := []layout.Node{
 		layout.Label{Text: "Settings", Style: layout.TextStyle{Bold: true, Size: 30, Fg: white}},
 		section("NOTIFICATIONS"),
 		row(setNotifyErrors, "Errors and confirmations", "As notifications instead of on screen, in a window", toggle(setNotifyErrors, st.NotifyErrors)),
 		row(setNotifyTracks, "Now playing", "Each new song while Smolify is in the background", toggle(setNotifyTracks, st.NotifyTracks)),
-		section("AUDIO QUALITY"),
-		row(setQuality, "Streaming quality", "96, 160, or 320 kbps, from the next song", choices(setQuality, qualities, st.Bitrate)),
-		section("PLAYBACK"),
+		section("AUDIO"),
+		layout.Label{NodeBase: layout.NodeBase{W: layout.Grow(1), PadLeft: 1, PadRight: 1}, Text: "Changes apply on next launch. Apply now briefly restarts playback.", Wrap: true, Style: secondary},
+		row(setQuality, "Streaming quality", "96, 160, or 320 kbps", s.settingQuality.Layout(setQuality+":select", s.focus == paneSettings && cursor == setQuality)),
 		row(setNormalise, "Normalize volume", "The same loudness for every song", toggle(setNormalise, st.Normalise)),
-		row(setCrossfade, "Crossfade", "Blend the end of a song into the next", choices(setCrossfade, crossfades, st.Crossfade)),
+		row(setCrossfade, "Crossfade", "Blend the end of a song into the next", s.settingCrossfade.Layout(setCrossfade+":select", s.focus == paneSettings && cursor == setCrossfade)),
 		row(setAutoplay, "Autoplay", "Keep playing similar songs when a list ends", toggle(setAutoplay, st.Autoplay)),
+		row(setApplyAudio, "Apply audio changes", "Restart the current player to use these choices", layout.Button{NodeBase: layout.NodeBase{ID: setApplyAudio + ":button"}, Label: applyLabel, Default: !s.applyingAudio && audioDirty, Disabled: s.applyingAudio || !audioDirty}),
 		section("DEVICE AND ACCOUNT"),
 		row(setDeviceName, "Device name", "How Smolify shows in Spotify Connect (Enter to keep)", name),
 		row(setCompact, "Compact rows", "One line per song", toggle(setCompact, st.Compact)),
@@ -383,6 +502,27 @@ func settingClicked(s *State, target string) bool {
 	}
 	id, part, _ := strings.Cut(strings.TrimPrefix(target, "set:"), ":")
 	id = "set:" + id
+	var selectChoice *flatui.Select
+	switch id {
+	case setQuality:
+		selectChoice = &s.settingQuality
+	case setCrossfade:
+		selectChoice = &s.settingCrossfade
+	}
+	if selectChoice != nil && selectChoice.Click(target, id+":select") {
+		for i, sid := range settingIDs {
+			if sid == id {
+				s.settingCursor = i
+			}
+		}
+		s.focus = paneSettings
+		if !selectChoice.IsOpen() {
+			chooseSetting(s, id, selectChoice.Selected())
+		}
+		return true
+	}
+	s.settingQuality.Close()
+	s.settingCrossfade.Close()
 	for i, sid := range settingIDs {
 		if sid == id {
 			s.settingCursor = i

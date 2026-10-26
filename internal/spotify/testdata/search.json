@@ -1,0 +1,132 @@
+{
+  "data": {
+    "searchV2": {
+      "tracksV2": {
+        "items": [
+          {
+            "item": {
+              "data": {
+                "__typename": "Track",
+                "uri": "spotify:track:1",
+                "name": "Overthink",
+                "duration": {
+                  "totalMilliseconds": 200000
+                },
+                "artists": {
+                  "items": [
+                    {
+                      "uri": "spotify:artist:k",
+                      "profile": {
+                        "name": "Kuo"
+                      }
+                    }
+                  ]
+                },
+                "albumOfTrack": {
+                  "uri": "spotify:album:t",
+                  "name": "Thinking",
+                  "coverArt": {
+                    "sources": [
+                      {
+                        "url": "big",
+                        "width": 640
+                      },
+                      {
+                        "url": "small",
+                        "width": 64
+                      },
+                      {
+                        "url": "mid",
+                        "width": 300
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          null,
+          {
+            "item": {
+              "data": {
+                "__typename": "NotFound"
+              }
+            }
+          }
+        ]
+      },
+      "albumsV2": {
+        "items": [
+          {
+            "data": {
+              "__typename": "Album",
+              "uri": "spotify:album:t",
+              "name": "Thinking",
+              "artists": {
+                "items": [
+                  {
+                    "uri": "spotify:artist:k",
+                    "profile": {
+                      "name": "Kuo"
+                    }
+                  }
+                ]
+              },
+              "coverArt": {
+                "sources": [
+                  {
+                    "url": "mid",
+                    "width": 300
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "artists": {
+        "items": [
+          {
+            "data": {
+              "__typename": "Artist",
+              "uri": "spotify:artist:k",
+              "profile": {
+                "name": "Kuo"
+              }
+            }
+          }
+        ]
+      },
+      "playlists": {
+        "items": [
+          null,
+          {
+            "data": {
+              "__typename": "Playlist",
+              "uri": "spotify:playlist:p",
+              "name": "Mix",
+              "description": "A mix",
+              "images": {
+                "items": [
+                  {
+                    "sources": [
+                      {
+                        "url": "cover",
+                        "width": 300
+                      }
+                    ]
+                  }
+                ]
+              },
+              "ownerV2": {
+                "data": {
+                  "name": "Spotify"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

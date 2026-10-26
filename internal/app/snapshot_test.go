@@ -14,9 +14,11 @@ import (
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui"
+	"github.com/lunguini/flatte/flatui/layout"
 	"github.com/lunguini/flatte/window"
 
 	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/spotify"
 )
 
 // TestWindowSnapshot renders the main window offscreen, for looking at the
@@ -42,10 +44,20 @@ func TestWindowSnapshot(t *testing.T) {
 	// Liked Songs and a playlist without a cover, on Smolify's own art.
 	s := a.State
 	s.username = "adrian"
+	s.discovery.Pages = make(map[string]discoveryPage)
 	// Settings, with the search field focused to show its focused look.
 	s.page, s.focus = pageSettings, paneSettings
+	s.settings.Bitrate = 160 // staged so the explicit Apply state is visible
+	s.settingQuality.Select(1)
+	s.settingCursor = 2
 	if img, err := window.Snapshot(a, snapOptions(110, 40), 2); err == nil {
 		if f, err := os.Create(filepath.Join(dir, "smolify-settings.png")); err == nil {
+			png.Encode(f, img)
+			f.Close()
+		}
+	}
+	if img, err := window.Snapshot(a, snapOptions(90, 34), 2); err == nil {
+		if f, err := os.Create(filepath.Join(dir, "smolify-settings-narrow.png")); err == nil {
 			png.Encode(f, img)
 			f.Close()
 		}
@@ -59,7 +71,7 @@ func TestWindowSnapshot(t *testing.T) {
 			f.Close()
 		}
 	}
-	s.focus, s.query = paneLibrary, flatui.TextField{}
+	s.page, s.focus, s.query = pageLibrary, paneLibrary, flatui.TextField{}
 	for _, page := range []struct{ name, uri string }{{"smolify-liked.png", player.LikedSongs(s.username)}, {"smolify-nocover.png", "p:3"}} {
 		l := s.listings["p:1"]
 		l.URI = page.uri
@@ -78,6 +90,132 @@ func TestWindowSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.Close()
+	}
+}
+
+func TestWindowLikedDatesSnapshot(t *testing.T) {
+	dir := os.Getenv("SMOLIFY_SNAPSHOT")
+	if dir == "" {
+		t.Skip("set SMOLIFY_SNAPSHOT=<dir> to render")
+	}
+	f := &fake{}
+	w := &likedWeb{fake: f, total: 3, failAt: -1, changeAt: -1, items: []spotify.SavedTrack{likedItem(0), likedItem(1), likedItem(2)}}
+	a := Windowed(New(f, nil, w, nil))
+	s := a.State
+	s.username, s.page, s.ready, s.focus = "adrian", pageLibrary, true, paneTracks
+	s.playlists = library
+	uri := player.LikedSongs(s.username)
+	tracks := []player.Track{savedTrack(w.items[0]), savedTrack(w.items[1]), savedTrack(w.items[2])}
+	s.listings[uri] = player.Listing{URI: uri, Ready: true, Length: len(tracks), Cached: len(tracks), Tracks: tracks}
+	s.shown = uri
+	s.tracks.SetCount(len(tracks))
+	s.rail.SetCount(len(s.library()))
+	s.rail.Select(0)
+	s.trackSort.SetOptions(sortOptions)
+	s.trackSort.Select(sortAddedAtDesc)
+	for _, size := range []struct {
+		name string
+		w, h int
+	}{{"smolify-liked-dates.png", 110, 34}, {"smolify-liked-dates-narrow.png", 70, 30}} {
+		scene := layout.LayoutScene(View(s, flatte.RenderContext{Width: size.w, Graphical: true}).Root, float64(size.w*8), float64(size.h*20),
+			layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32})
+		_, hasDate := scene.Rects["track-date-heading"]
+		if hasDate != (size.w >= 90) {
+			t.Fatalf("Date added heading at width %d: present=%v", size.w, hasDate)
+		}
+		img, err := window.Snapshot(a, snapOptions(size.w, size.h), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Create(filepath.Join(dir, size.name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(file, img); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		file.Close()
+	}
+}
+
+func TestWindowDiscoverySnapshot(t *testing.T) {
+	dir := os.Getenv("SMOLIFY_SNAPSHOT")
+	if dir == "" {
+		t.Skip("set SMOLIFY_SNAPSHOT=<dir> to render")
+	}
+	a := sampleApp()
+	s := a.State
+	s.username = "adrian"
+	s.discovery.Pages = make(map[string]discoveryPage)
+	s.page, s.focus, s.ready = pageHome, paneTracks, true
+	items := make([]spotify.HomeItem, 0, 8)
+	for i := range 6 {
+		uri := fmt.Sprintf("spotify:playlist:mix%d", i)
+		items = append(items, spotify.HomeItem{URI: uri, Name: fmt.Sprintf("Daily Mix %d", i+1), Kind: "playlist", Image: "home-cover"})
+	}
+	items = append(items,
+		spotify.HomeItem{URI: "spotify:playlist:discover", Name: "Discover Weekly", Kind: "playlist", Image: "home-cover"},
+		spotify.HomeItem{URI: "spotify:playlist:radar", Name: "Release Radar", Kind: "playlist", Image: "home-cover"},
+	)
+	s.discovery.Home = spotify.HomeFeed{Greeting: "Good evening", Sections: []spotify.HomeSection{{Title: "Made for you", Items: items}}}
+	s.covers["home-cover"] = art(color.RGBA{80, 130, 180, 255}, color.RGBA{100, 40, 150, 255})
+	for _, size := range []struct {
+		name string
+		w, h int
+	}{{"smolify-home-discovery.png", 110, 34}, {"smolify-home-discovery-narrow.png", 90, 34}} {
+		img, err := window.Snapshot(a, snapOptions(size.w, size.h), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Create(filepath.Join(dir, size.name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(file, img); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		file.Close()
+	}
+	for _, kind := range []string{"artist", "album"} {
+		uri := "spotify:" + kind + ":snapshot"
+		s.page, s.shown = pageBrowse, uri
+		page := discoveryPage{URI: uri, Name: "Discovery Example", Image: "home-cover", Kind: kind}
+		if kind == "artist" {
+			page.Artist = &spotify.ArtistOverview{Artist: spotify.Artist{URI: uri, Name: page.Name}, Image: "home-cover"}
+		} else {
+			page.Album = &spotify.AlbumDetails{Album: spotify.Album{URI: uri, Name: page.Name, Images: []spotify.Image{{URL: "home-cover"}}, Artists: []spotify.Artist{{URI: "spotify:artist:example", Name: "Example artist"}}}, Total: 9}
+		}
+		s.discovery.Pages[uri] = page
+		tracks := make([]player.Track, 0, 9)
+		for i := range 9 {
+			albumURI := fmt.Sprintf("spotify:album:single%d", i)
+			albumName := fmt.Sprintf("Single %d", i+1)
+			artists, artistURIs := []string{"Discovery Example"}, []string{uri}
+			if kind == "album" {
+				albumURI, albumName = uri, page.Name
+				artists, artistURIs = []string{"Example artist"}, []string{"spotify:artist:example"}
+			}
+			tracks = append(tracks, player.Track{URI: fmt.Sprintf("spotify:track:snapshot%d", i), Name: fmt.Sprintf("Sample song %d", i+1), Artists: artists, ArtistURIs: artistURIs, Album: albumName, AlbumURI: albumURI, Cover: "home-cover", Duration: 3 * time.Minute, TrackNumber: i + 1})
+		}
+		s.listings[uri] = player.Listing{URI: uri, Ready: true, Length: len(tracks), Cached: len(tracks), Tracks: tracks}
+		s.tracks.SetCount(len(tracks))
+		s.tracks.SetHeight(12)
+		s.tracks.Select(0)
+		img, err := window.Snapshot(a, snapOptions(110, 34), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.Create(filepath.Join(dir, "smolify-"+kind+"-discovery.png"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := png.Encode(file, img); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		file.Close()
 	}
 }
 
@@ -128,6 +266,7 @@ func sampleApp() flatte.App[State] {
 	f := &fake{}
 	a := New(f, nil, f, nil)
 	s := a.State
+	s.page = pageLibrary
 	s.ready = true
 	s.playlists = []player.Playlist{
 		{URI: "p:1", Name: "OverThink Radio", Owner: "Spotify", Length: 50, Image: "c:1", Description: "With Kuo, Lin and more. Updated daily."},
@@ -191,4 +330,72 @@ func art(a, b color.RGBA) image.Image {
 		}
 	}
 	return img
+}
+
+func TestWindowSortSnapshot(t *testing.T) {
+	dir := os.Getenv("SMOLIFY_SNAPSHOT")
+	if dir == "" {
+		t.Skip("set SMOLIFY_SNAPSHOT=<dir> to render")
+	}
+	a := sampleApp()
+	a.State.trackSort.Open()
+	img, err := window.Snapshot(a, snapOptions(110, 40), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(dir, "smolify-sort.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWindowPendingPlaybackSnapshot(t *testing.T) {
+	dir := os.Getenv("SMOLIFY_SNAPSHOT")
+	if dir == "" {
+		t.Skip("set SMOLIFY_SNAPSHOT=<dir> to render")
+	}
+	a := sampleApp()
+	s := a.State
+	track := s.listings[s.shown].Tracks[1]
+	s.tracks.Select(1)
+	s.pending = &playIntent{track: track, contextURI: s.shown, shown: s.shown, spinner: flatui.NewSpinner(flatui.SpinnerDots)}
+	img, err := window.Snapshot(a, snapOptions(110, 34), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(dir, "smolify-loading.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWindowPlaylistFilterSnapshot(t *testing.T) {
+	dir := os.Getenv("SMOLIFY_SNAPSHOT")
+	if dir == "" {
+		t.Skip("set SMOLIFY_SNAPSHOT=<dir> to render")
+	}
+	a := sampleApp()
+	s := a.State
+	changeTrackFilter(s, func(field *flatui.TextField) { *field = flatui.TextField{Value: "mara", Cursor: 4} })
+	s.focus = paneTrackFilter
+	img, err := window.Snapshot(a, snapOptions(110, 34), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(dir, "smolify-playlist-filter.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
 }

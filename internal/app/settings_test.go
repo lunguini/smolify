@@ -1,8 +1,11 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +50,7 @@ func settingsDriver(t *testing.T) (*flatest.Driver[State], *fake, string) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	f := &fake{playlists: library, status: player.Status{Volume: 40, VolumeSteps: 100}, listings: map[string]player.Listing{"spotify:playlist:a": bassHouse}}
 	d := flatest.Start(WithSettings(New(f, &covers{}, f, nil), path, DefaultSettings()), 100)
+	d.State().page = pageLibrary
 	d.State().searchDelay = 0
 	d.Send(flatte.ResizeEvent{Width: 100, Height: settingsHeight})
 	event(d, player.Ready{})
@@ -84,13 +88,28 @@ func TestSettingsPageByClickAndKeys(t *testing.T) {
 			t.Errorf("page missing %q:\n%s", want, fr)
 		}
 	}
-	// A click on a choice picks it, restarts the player with it, and saves.
-	click(t, d, setQuality+":1")
-	if s.settings.Bitrate != 160 || !strings.Contains(strings.Join(f.calls, ","), "configure 160 true 0s true") {
+	// The compact choice control cycles one value. Audio changes save for
+	// the next player session and do not interrupt current playback.
+	click(t, d, setQuality+":select")
+	click(t, d, setQuality+":select:option:0")
+	if s.settings.Bitrate != 96 || strings.Contains(strings.Join(f.calls, ","), "configure") {
 		t.Fatalf("bitrate %d calls %v", s.settings.Bitrate, f.calls)
 	}
-	if saved, _ := LoadSettings(path); saved.Bitrate != 160 {
+	if saved, _ := LoadSettings(path); saved.Bitrate != 96 {
 		t.Fatalf("saved %+v", saved)
+	}
+	if s.activeAudio.Bitrate != 320 {
+		t.Fatalf("staged setting changed active audio: %+v", s.activeAudio)
+	}
+	click(t, d, setApplyAudio+":button")
+	d.Settle()
+	if s.activeAudio.Bitrate != 96 || !strings.Contains(strings.Join(f.calls, ","), "configure 96 true 0s true") {
+		t.Fatalf("apply did not update runtime: active %+v calls %v", s.activeAudio, f.calls)
+	}
+	callsAfterApply := len(f.calls)
+	click(t, d, setApplyAudio+":button")
+	if len(f.calls) != callsAfterApply {
+		t.Fatalf("up-to-date audio options restarted playback: %v", f.calls[callsAfterApply:])
 	}
 	// Keys: ↓ to Normalize volume, space flips it; → steps crossfade.
 	s.settingCursor = 0
@@ -100,6 +119,7 @@ func TestSettingsPageByClickAndKeys(t *testing.T) {
 	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: ' '})
 	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
 	d.Send(flatte.KeyEvent{Key: flatte.KeyRight})
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
 	d.Settle()
 	if s.settings.Normalise || s.settings.Crossfade != 2 {
 		t.Fatalf("normalise %v crossfade %d", s.settings.Normalise, s.settings.Crossfade)
@@ -208,5 +228,159 @@ func TestSettingsKeyboardScrollsInAShortTerminal(t *testing.T) {
 	}
 	if s := d.State(); s.settingsScroll != s.settingsMax || s.settingsMax == 0 {
 		t.Fatalf("wheel: scroll %d max %d", s.settingsScroll, s.settingsMax)
+	}
+}
+
+func TestSettingsWritesKeepNewestRevision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	writer := &settingsWriter{path: path}
+	old := DefaultSettings()
+	newest := old
+	newest.Bitrate, newest.DeviceName = 96, "Latest"
+	saveOld := writer.prepare(old)
+	saveNewest := writer.prepare(newest)
+	// Async work may start in either order. An old worker starting last
+	// must never replace the newest snapshot.
+	if err := saveNewest(); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveOld(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := LoadSettings(path); err != nil || got != newest {
+		t.Fatalf("saved %+v, err %v", got, err)
+	}
+}
+
+func TestSettingsConcurrentAtomicWrites(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	errs := make(chan error, 40)
+	for i := range 40 {
+		go func() {
+			st := DefaultSettings()
+			st.DeviceName = strconv.Itoa(i)
+			errs <- saveSettings(path, st)
+		}()
+	}
+	for range 40 {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
+	}
+	if _, err := LoadSettings(path); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("temporary files left behind: %v, %v", entries, err)
+	}
+}
+
+func TestRapidSettingsChangesSaveFinalSnapshot(t *testing.T) {
+	d, _, path := settingsDriver(t)
+	s := d.State()
+	for range 8 {
+		changeSetting(s, setCompact, 1)
+		changeSetting(s, setNotifyTracks, 1)
+	}
+	want := s.settings
+	d.Settle()
+	if got, err := LoadSettings(path); err != nil || got != want {
+		t.Fatalf("saved %+v want %+v, err %v", got, want, err)
+	}
+}
+
+func TestRapidAudioChangesApplyOnlyLatestSettings(t *testing.T) {
+	d, f, path := settingsDriver(t)
+	s := d.State()
+	first := s.settings
+	first.Bitrate = 96
+	applySettings(s, first)
+	final := first
+	final.Bitrate, final.Crossfade = 160, 5
+	applySettings(s, final)
+	d.Settle()
+	if got := strings.Join(f.calls, ","); strings.Contains(got, "configure") || s.activeAudio != DefaultSettings().Audio() {
+		t.Fatalf("staging changed active audio: %+v calls %s", s.activeAudio, got)
+	}
+	if saved, err := LoadSettings(path); err != nil || saved != final {
+		t.Fatalf("saved %+v want %+v err %v", saved, final, err)
+	}
+	applyAudioSettings(s)
+	d.Settle()
+	if got := strings.Join(f.calls, ","); got != "configure 160 true 5s true" || s.activeAudio != final.Audio() {
+		t.Fatalf("apply did not use newest settings: active %+v calls %s", s.activeAudio, got)
+	}
+}
+
+func TestFailedAudioApplyKeepsPreviousActiveBaseline(t *testing.T) {
+	d, f, _ := settingsDriver(t)
+	s := d.State()
+	baseline := s.activeAudio
+	f.fail = errors.New("restart failed")
+	st := s.settings
+	st.Bitrate = 96
+	applySettings(s, st)
+	applyAudioSettings(s)
+	d.Settle()
+	if s.activeAudio != baseline || s.applyingAudio || !strings.Contains(s.status, "restart failed") {
+		t.Fatalf("failed apply: active=%+v applying=%v status=%q", s.activeAudio, s.applyingAudio, s.status)
+	}
+}
+
+type gatedAudioBackend struct {
+	*fake
+	started chan player.Audio
+	release chan struct{}
+}
+
+func (g *gatedAudioBackend) Configure(ctx context.Context, audio player.Audio) error {
+	g.started <- audio
+	select {
+	case <-g.release:
+		return g.fake.Configure(ctx, audio)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestAudioApplyCapturesSettingsWhileLaterEditsStayPending(t *testing.T) {
+	f := &fake{playlists: library, status: player.Status{Volume: 40, VolumeSteps: 100}, listings: map[string]player.Listing{"spotify:playlist:a": bassHouse}}
+	g := &gatedAudioBackend{fake: f, started: make(chan player.Audio, 1), release: make(chan struct{})}
+	d := flatest.Start(WithSettings(New(g, &covers{}, g, nil), "", DefaultSettings()), 100)
+	d.Send(flatte.ResizeEvent{Width: 100, Height: settingsHeight})
+	event(d, player.Ready{})
+	s := d.State()
+	first := s.settings
+	first.Bitrate = 96
+	applySettings(s, first)
+	wantApplied := first.Audio()
+	applyAudioSettings(s)
+	settled := make(chan struct{})
+	go func() {
+		d.Settle()
+		close(settled)
+	}()
+	select {
+	case got := <-g.started:
+		if got != wantApplied {
+			t.Fatalf("Configure started with %+v, want captured %+v", got, wantApplied)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Apply did not reach the backend")
+	}
+
+	newer := s.settings
+	newer.Crossfade = 5
+	applySettings(s, newer)
+	close(g.release)
+	select {
+	case <-settled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Apply completion did not settle")
+	}
+	if s.activeAudio != wantApplied || s.settings.Audio() != newer.Audio() || s.settings.Audio() == s.activeAudio {
+		t.Fatalf("apply/staging crossed: active=%+v saved=%+v", s.activeAudio, s.settings.Audio())
 	}
 }

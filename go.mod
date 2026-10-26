@@ -5,8 +5,8 @@ go 1.26.1
 require (
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/devgianlu/go-librespot v0.10.5
-	github.com/lunguini/flatte v0.1.2-0.20261023164441-4fe3a1f01622
-	github.com/lunguini/flatte/window v0.0.0-20261023164441-4fe3a1f01622
+	github.com/lunguini/flatte v0.1.2-0.20261026005458-1f5ea4544a22
+	github.com/lunguini/flatte/window v0.0.0-20261026005458-1f5ea4544a22
 	github.com/sirupsen/logrus v1.9.3
 	google.golang.org/protobuf v1.36.11
 )
