@@ -634,8 +634,13 @@ func (p *Player) SetShuffle(ctx context.Context, on bool) error {
 	return err
 }
 
-func (p *Player) SetRepeat(ctx context.Context, on bool) error {
-	_, err := p.request(ctx, daemon.ApiRequestTypeSetRepeatingContext, on)
+// SetRepeat sets both repeat modes: the whole context, and the one track
+// (which wins while it is on).
+func (p *Player) SetRepeat(ctx context.Context, r Repeat) error {
+	if _, err := p.request(ctx, daemon.ApiRequestTypeSetRepeatingContext, r.Context); err != nil {
+		return err
+	}
+	_, err := p.request(ctx, daemon.ApiRequestTypeSetRepeatingTrack, r.Track)
 	return err
 }
 

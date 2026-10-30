@@ -35,7 +35,7 @@ type Backend interface {
 	Seek(ctx context.Context, position time.Duration) error
 	SetVolume(ctx context.Context, v int) error
 	SetShuffle(ctx context.Context, on bool) error
-	SetRepeat(ctx context.Context, on bool) error
+	SetRepeat(ctx context.Context, r player.Repeat) error
 	ContextTracks(ctx context.Context, uri string) (player.Listing, error)
 	Queue(ctx context.Context, uri string) error
 	SetLiked(ctx context.Context, uris []string, liked bool) error
@@ -487,6 +487,9 @@ func onPlayer(s *State, ev player.Event) {
 		askLiked(s, []player.Track{e})
 	case player.Playing:
 		confirmPendingPlay(s, e)
+		if e.ContextURI != "" && e.ContextURI != s.context {
+			refreshModes(s)
+		}
 		s.playing, s.context = true, nonEmpty(e.ContextURI, s.context)
 	case player.Paused:
 		s.playing = false
@@ -507,7 +510,8 @@ func onPlayer(s *State, ev player.Event) {
 		if pendingMatches(s, e.URI, "") {
 			clearPendingPlay(s)
 		}
-		fail(s, "Could not play this track ("+e.Kind+").")
+		s.logf("playback error: uri=%s kind=%s unplayable=%v message=%q", e.URI, e.Kind, e.Unplayable, e.Message)
+		fail(s, playbackFailure(e))
 	case player.Failed:
 		s.playing = false
 		clearPendingPlay(s)
@@ -538,6 +542,43 @@ func loadLibrary(s *State) {
 		s.libraryRead = true
 		libraryChanged(s)
 		saveCache(s)
+	})
+}
+
+// playbackFailure explains a track that would not play. Spotify refusing
+// the track's key is told apart from a regional block: both arrive as
+// "restricted".
+func playbackFailure(e player.PlaybackError) string {
+	switch {
+	case strings.Contains(e.Message, "aes key"):
+		return "Could not play this track: Spotify refused its audio key (" + e.Message + ")."
+	case e.Message != "":
+		return "Could not play this track (" + e.Kind + "): " + e.Message + "."
+	}
+	return "Could not play this track (" + e.Kind + ")."
+}
+
+// nextRepeat cycles the repeat button: off, the whole list, one song.
+func nextRepeat(r player.Repeat) player.Repeat {
+	switch {
+	case r.Track:
+		return player.Repeat{}
+	case r.Context:
+		return player.Repeat{Track: true}
+	}
+	return player.Repeat{Context: true}
+}
+
+// refreshModes rereads shuffle and repeat. Starting a context may turn them
+// off without the player reporting it (when the context forbids them).
+func refreshModes(s *State) {
+	be := s.be
+	accountGo(s, "modes", func(ctx context.Context) (player.Status, error) {
+		return be.Status(ctx)
+	}, func(s *State, st player.Status, err error) {
+		if err == nil {
+			s.shuffle, s.repeat = st.Shuffle, st.Repeat
+		}
 	})
 }
 
@@ -1040,9 +1081,9 @@ func command(s *State, id string, fx flatte.Effects[State]) {
 		s.shuffle = on
 		send(s, "shuffle", func(ctx context.Context, be Backend) error { return be.SetShuffle(ctx, on) })
 	case cmdRepeat:
-		on := !s.repeat.Context
-		s.repeat.Context = on
-		send(s, "repeat", func(ctx context.Context, be Backend) error { return be.SetRepeat(ctx, on) })
+		r := nextRepeat(s.repeat)
+		s.repeat = r
+		send(s, "repeat", func(ctx context.Context, be Backend) error { return be.SetRepeat(ctx, r) })
 	case cmdVolumeUp, cmdVolumeDown:
 		step := volumeStep * s.volMax / 100
 		if id == cmdVolumeDown {

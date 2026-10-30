@@ -817,7 +817,7 @@ func playerBar(s *State, g bool) layout.Node {
 		layout.Button{NodeBase: sq(idPrev, "Previous (p)", 32), Icon: layout.IconPrevious, Label: "⏮", Plain: true, Style: subtle},
 		play,
 		layout.Button{NodeBase: sq(idNext, "Next (n)", 32), Icon: layout.IconNext, Label: "⏭", Plain: true, Style: subtle},
-		layout.Button{NodeBase: sq(idRepeat, "Repeat (r)", 32), Icon: layout.IconRepeat, Label: "↻", Plain: true, Style: mode(s.repeat.Context)},
+		layout.Button{NodeBase: sq(idRepeat, repeatTip(s.repeat), 32), Icon: layout.IconRepeat, Label: repeatLabel(s.repeat), Plain: true, Style: mode(s.repeat.Context || s.repeat.Track)},
 		layout.NewSpacer(),
 	}}
 
@@ -932,4 +932,23 @@ func loadingView(s *State, g bool) layout.Node {
 		layout.Label{NodeBase: layout.NodeBase{ID: "loading-message"}, Text: statusOr(s, "Loading…"), Style: subtle},
 	}}
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Grow(1), NoPadding: true}, Children: []layout.Node{layout.NewSpacer(), stack, layout.NewSpacer()}}
+}
+
+// repeatLabel is the repeat button's terminal text: ↻1 while one song repeats.
+func repeatLabel(r player.Repeat) string {
+	if r.Track {
+		return "↻1"
+	}
+	return "↻"
+}
+
+// repeatTip names the mode the repeat button is in.
+func repeatTip(r player.Repeat) string {
+	switch {
+	case r.Track:
+		return "Repeating this song (r)"
+	case r.Context:
+		return "Repeating the list (r)"
+	}
+	return "Repeat (r)"
 }

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/lunguini/flatte"
+
+	"github.com/lunguini/smolify/internal/player"
 )
 
 func key(k flatte.Key, mod flatte.Mod) flatte.KeyEvent { return flatte.KeyEvent{Key: k, Mod: mod} }
@@ -50,7 +52,7 @@ func Menus(s *State) []flatte.Menu {
 			{ID: cmdVolumeDown, Label: "Volume Down", Keys: keys(key(flatte.KeyDown, flatte.ModSuper), char('-', 0))},
 			{Separator: true},
 			{ID: cmdShuffle, Label: "Shuffle", Checked: s.shuffle, Keys: keys(char('s', 0))},
-			{ID: cmdRepeat, Label: "Repeat", Checked: s.repeat.Context, Keys: keys(char('r', 0))},
+			{ID: cmdRepeat, Label: repeatMenu(s.repeat), Checked: s.repeat.Context || s.repeat.Track, Keys: keys(char('r', 0))},
 			{Separator: true},
 			{ID: cmdLike, Label: likeLabel(liked), Keys: keys(char('l', 0)), Disabled: !song},
 		}},
@@ -138,4 +140,12 @@ func editingKey(k flatte.Key) bool {
 		return true
 	}
 	return false
+}
+
+// repeatMenu labels the repeat item with the mode it is in.
+func repeatMenu(r player.Repeat) string {
+	if r.Track {
+		return "Repeat One"
+	}
+	return "Repeat"
 }

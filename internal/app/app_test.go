@@ -83,7 +83,9 @@ func (f *fake) SetVolume(_ context.Context, v int) error {
 	return f.record("volume " + strconv.Itoa(v))
 }
 func (f *fake) SetShuffle(_ context.Context, on bool) error { return f.record("shuffle " + bstr(on)) }
-func (f *fake) SetRepeat(_ context.Context, on bool) error  { return f.record("repeat " + bstr(on)) }
+func (f *fake) SetRepeat(_ context.Context, r player.Repeat) error {
+	return f.record("repeat " + bstr(r.Context) + " " + bstr(r.Track))
+}
 
 func (f *fake) ContextTracks(_ context.Context, uri string) (player.Listing, error) {
 	f.reads = append(f.reads, "tracks "+uri)
@@ -246,7 +248,7 @@ func TestNowPlaying(t *testing.T) {
 		d.Send(k)
 	}
 	d.Settle()
-	want := []string{"playpause", "next", "prev", "shuffle on", "repeat on", "seek 18s", "volume 45"}
+	want := []string{"playpause", "next", "prev", "shuffle on", "repeat on off", "seek 18s", "volume 45"}
 	if strings.Join(f.calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls %v, want %v", f.calls, want)
 	}
@@ -1030,5 +1032,58 @@ func TestClearingFailedSearchClearsItsError(t *testing.T) {
 	d.Send(flatte.KeyEvent{Key: flatte.KeyBackspace})
 	if fr := plain(d.Settle()); strings.Contains(fr, "Could not search:") || d.State().status != "" || d.State().page != pageLibrary {
 		t.Fatalf("failed query left its error after clearing:\n%s", fr)
+	}
+}
+
+func TestRepeatCyclesListOneOff(t *testing.T) {
+	d, f := ready(t)
+	for range 3 {
+		d.Send(char('r', 0))
+		d.Settle()
+	}
+	want := []string{"repeat on off", "repeat off on", "repeat off off"}
+	if strings.Join(f.calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls %v, want %v", f.calls, want)
+	}
+	if r := d.State().repeat; r.Context || r.Track {
+		t.Fatalf("repeat %+v after a full cycle", r)
+	}
+	d.Send(char('r', 0))
+	d.Send(char('r', 0))
+	d.Settle()
+	if !strings.Contains(plain(d.Frame()), "↻1") {
+		t.Fatalf("repeat-one not shown:\n%s", plain(d.Frame()))
+	}
+}
+
+func TestNewContextRereadsModes(t *testing.T) {
+	d, f := ready(t)
+	d.Send(char('r', 0))
+	d.Settle()
+	// The player turned repeat off when the new context began, unreported.
+	f.status = player.Status{}
+	f.calls = nil
+	event(d, player.Playing{URI: "spotify:track:1", ContextURI: "spotify:playlist:b"})
+	if r := d.State().repeat; r.Context || r.Track {
+		t.Fatalf("repeat %+v kept after the player dropped it", r)
+	}
+	f.calls = nil
+	event(d, player.Playing{URI: "spotify:track:2", ContextURI: "spotify:playlist:b"})
+	if strings.Contains(strings.Join(f.calls, ","), "status") {
+		t.Fatalf("same context reread modes: %v", f.calls)
+	}
+}
+
+func TestPlaybackFailureNamesTheCause(t *testing.T) {
+	key := playbackFailure(player.PlaybackError{Kind: "restricted", Message: "load: failed retrieving aes key with code 2"})
+	if !strings.Contains(key, "audio key") || !strings.Contains(key, "code 2") {
+		t.Fatalf("key refusal: %q", key)
+	}
+	region := playbackFailure(player.PlaybackError{Kind: "restricted", Message: "media is restricted"})
+	if !strings.Contains(region, "media is restricted") {
+		t.Fatalf("region: %q", region)
+	}
+	if got := playbackFailure(player.PlaybackError{Kind: "restricted"}); got != "Could not play this track (restricted)." {
+		t.Fatalf("bare: %q", got)
 	}
 }

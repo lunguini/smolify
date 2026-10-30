@@ -58,6 +58,7 @@ type (
 type PlaybackError struct {
 	URI, Kind  string
 	Unplayable bool
+	Message    string // the player's own account of the failure
 }
 
 // Failed reports that the player stopped with an error.
@@ -121,7 +122,7 @@ func eventOf(ev *daemon.ApiEvent, repeat *Repeat) (Event, bool) {
 		repeat.Track = d.Value
 		return *repeat, true
 	case daemon.ApiEventDataPlaybackError:
-		return PlaybackError{URI: d.Uri, Kind: d.Kind, Unplayable: d.Unplayable}, true
+		return PlaybackError{URI: d.Uri, Kind: d.Kind, Unplayable: d.Unplayable, Message: d.Message}, true
 	}
 	if ev.Type == daemon.ApiEventTypePlaybackReady {
 		return Ready{}, true
