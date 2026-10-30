@@ -1,8 +1,8 @@
 //go:build !js || !wasm
 
 // Command smolify is a small, fast Spotify client: in the terminal, or in a
-// native window with -gui. It plays through the Mac's audio output (Spotify
-// Premium required).
+// native window with -gui on supported platforms. It plays through the Mac's
+// audio output (Spotify Premium required).
 package main
 
 import (
@@ -26,7 +26,10 @@ import (
 )
 
 func main() {
-	gui := flag.Bool("gui", false, "run in a native window instead of the terminal")
+	gui := false
+	if window.Supported() {
+		flag.BoolVar(&gui, "gui", false, "run in a native window instead of the terminal")
+	}
 	signOut := flag.Bool("sign-out", false, "forget the stored Spotify sign-in and exit")
 	debugLog := flag.String("debug-log", "", "log player events, commands, requests, and memory to this file")
 	heapProfile := flag.String("heap-profile", "", "write a heap profile to this file on exit")
@@ -80,13 +83,19 @@ func main() {
 	}
 	web := &spotify.Client{Token: p.Token, ClientToken: p.ClientToken}
 	a := app.WithCache(app.WithSettings(app.New(p, app.HTTPImages{}, web, debug), settingsPath, settings), cacheDir)
-	if *gui {
+	runOptions := []flatte.Option{
+		flatte.WithMouse(flatte.MouseModeCellMotion),
+		flatte.WithoutDefaultQuit(),
+		flatte.WithReportFocus(),
+	}
+	if gui {
 		a = app.Windowed(a)
 		theme := app.WindowTheme()
-		err = window.Run(ctx, a, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
+		runOptions = append(runOptions, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
 	} else {
-		err = window.RunTerminal(ctx, a, flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit(), flatte.WithReportFocus())
+		runOptions = append(runOptions, window.MediaControls{})
 	}
+	err = flatte.Run(ctx, a, runOptions...)
 	if err != nil {
 		fail(err)
 	}
