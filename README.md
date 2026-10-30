@@ -6,6 +6,31 @@ A small, fast Spotify client for the terminal and the desktop, built with
 
 Work in progress. Requires Spotify Premium. Not affiliated with Spotify.
 
+## Install
+
+With Go 1.26 or later, until there are Homebrew and release builds:
+
+```bash
+brew install libogg libvorbis flac mpg123   # audio codecs (cgo)
+go install github.com/lunguini/smolify/cmd/smolify@latest
+smolify          # in the terminal
+smolify -gui     # in a window (macOS)
+```
+
+`go install` puts `smolify` in `$(go env GOPATH)/bin` (usually `~/go/bin`);
+add that to your `PATH` if the command is not found. Run the same
+`go install` again to update.
+
+While the repository is private, Go has to fetch it with your GitHub access
+instead of the public module proxy:
+
+```bash
+GOPRIVATE=github.com/lunguini go install github.com/lunguini/smolify/cmd/smolify@latest
+```
+
+On first run, Smolify shows a code: open spotify.com/pair and enter it to
+sign in.
+
 ## Build
 
 ```bash
