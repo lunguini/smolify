@@ -198,6 +198,41 @@ func focusLibrary(t *testing.T, d *flatest.Driver[State]) {
 	}
 }
 
+type noRadioFake struct{ *fake }
+
+func (noRadioFake) SupportsRadio() bool { return false }
+
+type noSignOutFake struct{ *fake }
+
+func (noSignOutFake) SupportsSignOut() bool { return false }
+
+func TestSongRadioMenuFollowsBackendSupport(t *testing.T) {
+	d, f := ready(t)
+	s := d.State()
+	s.be = noRadioFake{f}
+	s.shown = bassHouse.URI
+	s.listings[bassHouse.URI] = bassHouse
+	var radio flatte.MenuItem
+	for _, item := range ContextMenu(s, idTracks+":0") {
+		if item.ID == "song-radio" {
+			radio = item
+			break
+		}
+	}
+	if radio.ID == "" || !radio.Disabled {
+		t.Fatalf("radio menu item = %+v", radio)
+	}
+}
+
+func TestSignOutRequiresAccountSupport(t *testing.T) {
+	if supportsSignOut(&State{be: noSignOutFake{&fake{}}}) {
+		t.Fatal("sign out enabled for a backend without an account")
+	}
+	if !supportsSignOut(&State{be: &fake{}}) {
+		t.Fatal("native fake lost default sign-out behavior")
+	}
+}
+
 func TestBrowseAndPlay(t *testing.T) {
 	d, f := ready(t)
 	focusLibrary(t, d)

@@ -19,8 +19,8 @@ type SettingsStore interface {
 	Save(Settings) error
 }
 
-// Settings are what the Settings page changes, kept in settings.json next
-// to the player's state.
+// Settings are the user preferences changed on the Settings page. The host
+// persists them through SettingsStore.
 type Settings struct {
 	// NotifyErrors posts errors and confirmations as notifications (in a
 	// window, which shows them nowhere else).
@@ -129,7 +129,9 @@ func changeSetting(s *State, id string, step int) {
 		s.focus = paneDevice
 		return
 	case setSignOut:
-		confirmSignOut(s)
+		if supportsSignOut(s) {
+			confirmSignOut(s)
+		}
 		return
 	default:
 		return
@@ -175,6 +177,11 @@ func applyAudioSettings(s *State) {
 
 func wrap(i, n int) int { return ((i % n) + n) % n }
 
+func supportsSignOut(s *State) bool {
+	capability, ok := s.be.(interface{ SupportsSignOut() bool })
+	return !ok || capability.SupportsSignOut()
+}
+
 // applySettings makes st the settings: saved, and passed on to whatever
 // they control. Audio options are startup-only in go-librespot, so they are
 // persisted for the next player session instead of restarting active playback.
@@ -200,6 +207,9 @@ func applySettings(s *State, st Settings) {
 
 // confirmSignOut asks before forgetting the sign-in.
 func confirmSignOut(s *State) {
+	if !supportsSignOut(s) {
+		return
+	}
 	flatte.Alert(s.fx, "sign-out", flatte.AlertDialog{
 		Title:   "Sign out of Spotify?",
 		Message: "Smolify forgets this device's sign-in and asks you to pair it again.",
@@ -385,7 +395,7 @@ func settingsView(s *State, g bool) layout.Node {
 		section("DEVICE AND ACCOUNT"),
 		row(setDeviceName, "Device name", "How Smolify shows in Spotify Connect (Enter to keep)", name),
 		row(setCompact, "Compact rows", "One line per song", toggle(setCompact, st.Compact)),
-		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Fg: danger}}),
+		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Fg: danger}, Disabled: !supportsSignOut(s)}),
 	}
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Grow(1), Pad: pick(g, 2, 1)}, Children: []layout.Node{
 		layout.Scroll{NodeBase: layout.NodeBase{ID: idSettingsScroll, W: layout.Grow(1), H: layout.Grow(1)}, OffsetY: s.settingsScroll, Child: layout.Col{NodeBase: layout.NodeBase{ID: idSettingsContent, W: layout.Grow(1)}, Children: body}},

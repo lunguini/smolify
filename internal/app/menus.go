@@ -98,6 +98,10 @@ func ContextMenu(s *State, target string) []flatte.MenuItem {
 	}
 	t := l.Tracks[i]
 	song := strings.HasPrefix(t.URI, "spotify:track:")
+	radioSupported := true
+	if support, ok := s.be.(interface{ SupportsRadio() bool }); ok {
+		radioSupported = support.SupportsRadio()
+	}
 	return []flatte.MenuItem{
 		{ID: cmdPlayTrack, Label: "Play"},
 		{ID: cmdQueue, Label: "Add to Queue"},
@@ -106,7 +110,7 @@ func ContextMenu(s *State, target string) []flatte.MenuItem {
 		{Separator: true},
 		{ID: "open-track-album", Label: "Go to Album", Disabled: t.AlbumURI == ""},
 		{ID: "open-track-artist", Label: "Go to Artist", Disabled: len(t.ArtistURIs) == 0},
-		{ID: "song-radio", Label: "Song Radio", Disabled: !song},
+		{ID: "song-radio", Label: "Song Radio", Disabled: !song || !radioSupported},
 	}
 }
 

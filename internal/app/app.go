@@ -1,5 +1,5 @@
 // Package app is Smolify's UI: one state, pure views, and handlers, drawn by
-// Flatte in a terminal or a window. It drives the player through Backend.
+// Flatte in a terminal, window, or browser. It drives playback through Backend.
 package app
 
 import (
@@ -22,8 +22,8 @@ import (
 	"github.com/lunguini/smolify/internal/model"
 )
 
-// Backend is the player as the UI uses it (a model.Player adapter, or a fake in
-// tests). Requests block; the UI calls them off the loop.
+// Backend is the playback service as the UI uses it (or a fake in tests).
+// Requests block; the UI calls them off the loop.
 type Backend interface {
 	Events() <-chan model.Event
 	Status(ctx context.Context) (model.Status, error)
