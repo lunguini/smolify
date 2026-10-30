@@ -186,8 +186,19 @@ func ready(t *testing.T) (*flatest.Driver[State], *fake) {
 	return d, f
 }
 
+func focusLibrary(t *testing.T, d *flatest.Driver[State]) {
+	t.Helper()
+	for _, want := range []pane{paneTrackFilter, paneSort, paneLibrary} {
+		d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
+		if d.State().focus != want {
+			t.Fatalf("Tab focus %v, want %v", d.State().focus, want)
+		}
+	}
+}
+
 func TestBrowseAndPlay(t *testing.T) {
 	d, f := ready(t)
+	focusLibrary(t, d)
 	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
 	fr := d.Frame()
 	if !strings.Contains(plain(fr), "Car Music") || !strings.Contains(plain(fr), "For the road.") || !strings.Contains(plain(fr), "adrian · 7 songs") {
@@ -428,7 +439,6 @@ func TestTrackTablePlaysFromATrack(t *testing.T) {
 	if !strings.Contains(strings.Join(f.reads, ","), "liked spotify:track:1,spotify:track:2") || strings.Contains(strings.Join(f.reads, ","), "episode") {
 		t.Fatalf("liked reads %v", f.reads)
 	}
-	d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
 	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
 	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
 	d.Settle()
@@ -577,6 +587,7 @@ func TestLikedSongsInTheLibrary(t *testing.T) {
 	if pl, _ := s.selected(); pl.URI != "spotify:playlist:a" || s.rail.Cursor() != 1 {
 		t.Fatalf("selected %+v at %d", pl, s.rail.Cursor())
 	}
+	focusLibrary(t, d)
 	d.Send(flatte.KeyEvent{Key: flatte.KeyUp})
 	fr := d.Settle()
 	if !strings.Contains(plain(fr), "Liked Songs") || !strings.Contains(plain(fr), "You · 1 song") || !strings.Contains(plain(fr), "♥") {
@@ -830,6 +841,7 @@ func TestUnlikeEditsLikedSongsInPlace(t *testing.T) {
 	f.listings[liked] = full
 	f.liked = map[string]bool{song.URI: true, two.URI: true}
 	event(d, player.Ready{})
+	focusLibrary(t, d)
 	d.Send(flatte.KeyEvent{Key: flatte.KeyUp}) // to Liked Songs
 	d.Settle()
 	s := d.State()
