@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="smolify-client-id" content="">
+    <meta name="smolify-redirect-uri" content="">
+    <meta name="theme-color" content="#111014">
+    <title>Smolify</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #111014;
+        color: #f5f1ff;
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; }
+      body { display: flex; flex-direction: column; overflow: hidden; }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-height: 48px;
+        padding: 0 16px;
+        border-bottom: 1px solid #2a2731;
+        background: #151319;
+      }
+      .title { font-weight: 700; letter-spacing: .02em; }
+      #mode-status {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        color: #b8b1c6;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+      }
+      header a {
+        color: #d0bdff;
+        border: 1px solid #594b76;
+        border-radius: 6px;
+        padding: 7px 10px;
+        font-size: 12px;
+        text-decoration: none;
+      }
+      header a:hover { background: #25202f; }
+      #app {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 10px;
+        outline: none;
+        background: #111014;
+        color: #f5f1ff;
+        font-family: inherit;
+        font-size: 13px;
+        line-height: 1.28;
+        white-space: pre;
+        scrollbar-color: #4d465a #111014;
+      }
+      [data-flatte-content] { display: block; width: max-content; min-width: 100%; }
+      @media (max-width: 540px) {
+        header { gap: 8px; padding: 0 10px; }
+        .title { font-size: 13px; }
+        #mode-status { font-size: 10px; }
+        header a { padding: 6px 7px; font-size: 10px; }
+        #app { padding: 6px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="title">Smolify</span>
+      <span id="mode-status" role="status" aria-live="polite">Starting…</span>
+      <a href="?spotify">Connect account</a>
+      <a href="?demo">Demo</a>
+    </header>
+    <main id="app" data-flatte aria-label="Smolify music player"></main>
+    <noscript>Smolify needs JavaScript to run.</noscript>
+    <script src="./wasm_exec.js"></script>
+    <script>
+      window.SmolifyConfig = window.SmolifyConfig || {};
+      (async () => {
+        const status = document.getElementById("mode-status");
+        const go = new Go();
+        try {
+          let result;
+          try {
+            result = await WebAssembly.instantiateStreaming(fetch("./smolify.wasm"), go.importObject);
+          } catch (_) {
+            const response = await fetch("./smolify.wasm");
+            result = await WebAssembly.instantiate(await response.arrayBuffer(), go.importObject);
+          }
+          await go.run(result.instance);
+        } catch (error) {
+          status.textContent = "Could not start Smolify: " + error;
+        }
+      })();
+    </script>
+  </body>
+</html>

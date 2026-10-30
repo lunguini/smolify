@@ -5,3 +5,5 @@
 
 /go.work
 /go.work.sum
+/dist/
+/web/wasm_exec.js
