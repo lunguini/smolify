@@ -103,7 +103,7 @@ func main() {
 	a := app.New(backend, webimages.Images{}, backend, nil)
 	a = app.WithSettingsStore(a, browserSettingsStore{}, settings)
 	a = app.WithCacheStore(a, librarycache.New(""))
-	if err := flatte.Run(ctx, a); err != nil {
+	if err := flatte.Run(ctx, a, runOptions...); err != nil {
 		setStatus("Smolify could not start: " + err.Error())
 	}
 }
@@ -114,7 +114,7 @@ func startDemo(ctx context.Context, settings app.Settings) {
 	setStatus("Demo mode · sample data and simulated playback")
 	a := app.New(backend, backend, backend, nil)
 	a = app.WithSettingsStore(a, browserSettingsStore{}, settings)
-	if err := flatte.Run(ctx, a); err != nil {
+	if err := flatte.Run(ctx, a, runOptions...); err != nil {
 		setStatus("Smolify could not start: " + err.Error())
 	}
 }
@@ -171,3 +171,7 @@ func setStatus(message string) {
 		status.Set("textContent", message)
 	}
 }
+
+// runOptions match the terminal build: mouse input with motion (hover),
+// shortcuts left to the app, and focus reports for notifications.
+var runOptions = []flatte.Option{flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit(), flatte.WithReportFocus()}
