@@ -4,19 +4,19 @@ import (
 	"context"
 	"strings"
 
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 // A track has one in-flight write. Repeated clicks change its desired value;
 // the next request follows acknowledgement, keeping rollback and disk state
 // based on confirmed membership rather than another optimistic click.
 type likeChange struct {
-	track                     player.Track
-	baseline                  player.Listing
+	track                     model.Track
+	baseline                  model.Listing
 	known, confirmed, desired bool
 }
 
-func setLiked(s *State, t player.Track, on bool) {
+func setLiked(s *State, t model.Track, on bool) {
 	if !strings.HasPrefix(t.URI, "spotify:track:") {
 		return
 	}
@@ -24,14 +24,14 @@ func setLiked(s *State, t player.Track, on bool) {
 	first := change == nil
 	if first {
 		was, known := s.liked[t.URI]
-		change = &likeChange{track: t, baseline: s.listings[player.LikedSongs(s.username)], known: known, confirmed: was}
+		change = &likeChange{track: t, baseline: s.listings[model.LikedSongs(s.username)], known: known, confirmed: was}
 		s.likeChanges[t.URI] = change
 		s.likedWrites++
 	}
 	change.desired = on
 	s.liked[t.URI] = on
 	if s.username != "" {
-		uri := player.LikedSongs(s.username)
+		uri := model.LikedSongs(s.username)
 		s.likedGeneration[uri]++
 		delete(s.likedLoads, uri)
 		if listing, ok := s.listings[uri]; ok {
@@ -70,7 +70,7 @@ func writeLike(s *State, uri string, change *likeChange) {
 		} else {
 			delete(s.liked, uri)
 		}
-		likedURI := player.LikedSongs(s.username)
+		likedURI := model.LikedSongs(s.username)
 		if listing, ok := s.listings[likedURI]; ok {
 			if change.confirmed {
 				listing = restoreLikedTrack(listing, change.baseline, change.track)
@@ -94,7 +94,7 @@ func writeLike(s *State, uri string, change *likeChange) {
 
 // Restore the original occurrence relative to surviving neighbors. Other
 // tracks' successful updates are preserved when a concurrent unlike fails.
-func restoreLikedTrack(current, before player.Listing, t player.Track) player.Listing {
+func restoreLikedTrack(current, before model.Listing, t model.Track) model.Listing {
 	if indexOf(current.Tracks, t.URI) >= 0 {
 		return current
 	}
@@ -117,7 +117,7 @@ func restoreLikedTrack(current, before player.Listing, t player.Track) player.Li
 			}
 		}
 	}
-	tracks := make([]player.Track, 0, len(current.Tracks)+1)
+	tracks := make([]model.Track, 0, len(current.Tracks)+1)
 	tracks = append(tracks, current.Tracks[:position]...)
 	tracks = append(tracks, before.Tracks[original])
 	tracks = append(tracks, current.Tracks[position:]...)

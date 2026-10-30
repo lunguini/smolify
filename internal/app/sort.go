@@ -7,7 +7,7 @@ import (
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui/layout"
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 const idSort = "track-sort"
@@ -39,7 +39,7 @@ var regularSortOptions = []string{
 }
 
 func likedURI(s *State, uri string) bool {
-	return s.username != "" && uri == player.LikedSongs(s.username)
+	return s.username != "" && uri == model.LikedSongs(s.username)
 }
 
 func hasLikedTracks(s *State) bool {
@@ -92,7 +92,7 @@ func modeAt(s *State, index int) int {
 
 // displayListing derives the display order without changing the server's
 // canonical playlist. Actions use the same order as the rows they target.
-func displayListing(s *State, l player.Listing) player.Listing {
+func displayListing(s *State, l model.Listing) model.Listing {
 	l = filterTracks(s, l)
 	mode := sortMode(s)
 	if mode == sortPositionAsc || virtual(l.URI) {
@@ -104,7 +104,7 @@ func displayListing(s *State, l player.Listing) player.Listing {
 		return l
 	}
 	type keyedTrack struct {
-		track player.Track
+		track model.Track
 		key   string
 	}
 	keyed := make([]keyedTrack, len(l.Tracks))
@@ -153,7 +153,7 @@ func displayListing(s *State, l player.Listing) player.Listing {
 		}
 		return order
 	})
-	l.Tracks = make([]player.Track, len(keyed))
+	l.Tracks = make([]model.Track, len(keyed))
 	for i, t := range keyed {
 		l.Tracks[i] = t.track
 	}
@@ -193,7 +193,7 @@ func keepTrack(s *State, uri string, selected bool) {
 
 // replaceListing also remaps the selected track as partially loaded metadata
 // changes a sorted list's order.
-func replaceListing(s *State, uri string, l player.Listing) {
+func replaceListing(s *State, uri string, l model.Listing) {
 	selected, ok := s.selectedTrack()
 	s.listings[uri] = l
 	if uri == s.shown {
@@ -259,7 +259,7 @@ func sortClick(s *State, target string) bool {
 
 // originalPositionNumbers keeps the # column tied to source playlist
 // positions. Occurrence queues distinguish repeated copies of one song.
-func originalPositionNumbers(source, displayed []player.Track, reverse bool) []int {
+func originalPositionNumbers(source, displayed []model.Track, reverse bool) []int {
 	positions := make(map[string][]int, len(source))
 	for i, track := range source {
 		positions[track.URI] = append(positions[track.URI], i+1)

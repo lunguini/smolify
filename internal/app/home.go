@@ -7,24 +7,24 @@ import (
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui/layout"
-	"github.com/lunguini/smolify/internal/player"
-	"github.com/lunguini/smolify/internal/spotify"
+	"github.com/lunguini/smolify/internal/catalog"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 // Discovery clients are optional so apps and tests that only implement Search
 // keep working without fake Home or catalog data.
 type homeWeb interface {
-	Home(context.Context) (spotify.HomeFeed, error)
+	Home(context.Context) (catalog.HomeFeed, error)
 }
 type artistWeb interface {
-	Artist(context.Context, string) (spotify.ArtistOverview, error)
+	Artist(context.Context, string) (catalog.ArtistOverview, error)
 }
 type albumWeb interface {
-	Album(context.Context, string) (spotify.AlbumDetails, error)
+	Album(context.Context, string) (catalog.AlbumDetails, error)
 }
 
 type discoveryState struct {
-	Home            spotify.HomeFeed
+	Home            catalog.HomeFeed
 	HomeRequested   bool
 	HomeLoading     bool
 	HomeError       string
@@ -40,8 +40,8 @@ type discoveryState struct {
 
 type discoveryPage struct {
 	URI, Name, Image, Kind string
-	Artist                 *spotify.ArtistOverview
-	Album                  *spotify.AlbumDetails
+	Artist                 *catalog.ArtistOverview
+	Album                  *catalog.AlbumDetails
 	Loading                bool
 	Err                    string
 }
@@ -63,7 +63,7 @@ func loadHomeFeed(s *State, retry ...bool) {
 		return
 	}
 	s.discovery.HomeLoading, s.discovery.HomeError = true, ""
-	accountLatest(s, "discovery-home", web.Home, func(s *State, feed spotify.HomeFeed, err error) {
+	accountLatest(s, "discovery-home", web.Home, func(s *State, feed catalog.HomeFeed, err error) {
 		s.discovery.HomeLoading = false
 		if err != nil {
 			showHomePlaylistFallback(s, err.Error())
@@ -83,20 +83,20 @@ func showHomePlaylistFallback(s *State, reason string) {
 		s.discovery.HomeError = reason
 		return
 	}
-	section := spotify.HomeSection{Title: "Made for you"}
+	section := catalog.HomeSection{Title: "Made for you"}
 	for _, p := range playlists {
-		section.Items = append(section.Items, spotify.HomeItem{URI: p.URI, Name: p.Name, Kind: "playlist", Image: p.Image})
+		section.Items = append(section.Items, catalog.HomeItem{URI: p.URI, Name: p.Name, Kind: "playlist", Image: p.Image})
 	}
-	s.discovery.Home = spotify.HomeFeed{Sections: []spotify.HomeSection{section}}
+	s.discovery.Home = catalog.HomeFeed{Sections: []catalog.HomeSection{section}}
 	s.discovery.HomeError = reason
 	s.discovery.HomeFallback = true
 }
 
 // homePlaylistFallback finds only the account's actual mix-like playlists.
 // It is used when private Home is unavailable and never fabricates playlist IDs.
-func homePlaylistFallback(playlists []player.Playlist) []player.Playlist {
+func homePlaylistFallback(playlists []model.Playlist) []model.Playlist {
 	needles := []string{"daily mix", "discover weekly", "release radar", "made for you"}
-	var out []player.Playlist
+	var out []model.Playlist
 	seen := make(map[string]bool)
 	for _, p := range playlists {
 		name := strings.ToLower(strings.TrimSpace(p.Name))
@@ -121,13 +121,13 @@ const (
 )
 
 // homeSections keeps recent songs available alongside Spotify's own shelves.
-func homeSections(s *State) []spotify.HomeSection {
-	sections := make([]spotify.HomeSection, 0, len(s.discovery.Home.Sections)+1)
-	recent := spotify.HomeSection{Title: "Recently played"}
+func homeSections(s *State) []catalog.HomeSection {
+	sections := make([]catalog.HomeSection, 0, len(s.discovery.Home.Sections)+1)
+	recent := catalog.HomeSection{Title: "Recently played"}
 	for _, track := range s.listings[uriHome].Tracks {
-		item := spotify.HomeItem{URI: track.URI, Name: track.Name, Kind: "track", Image: track.Cover}
+		item := catalog.HomeItem{URI: track.URI, Name: track.Name, Kind: "track", Image: track.Cover}
 		for i, name := range track.Artists {
-			artist := spotify.Artist{Name: name}
+			artist := catalog.Artist{Name: name}
 			if i < len(track.ArtistURIs) {
 				artist.URI = track.ArtistURIs[i]
 			}
@@ -144,8 +144,8 @@ func homeSections(s *State) []spotify.HomeSection {
 	return sections
 }
 
-func homeItems(s *State) []spotify.HomeItem {
-	var items []spotify.HomeItem
+func homeItems(s *State) []catalog.HomeItem {
+	var items []catalog.HomeItem
 	for _, section := range homeSections(s) {
 		items = append(items, section.Items...)
 	}

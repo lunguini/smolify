@@ -12,7 +12,7 @@ import (
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui/layout"
 
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 // pick is gui in a window and term in a terminal: sizes in points round up
@@ -122,7 +122,7 @@ func pairingView(s *State) layout.Node {
 	return centered(
 		layout.Label{Text: "Sign in to Spotify", Style: layout.TextStyle{Role: layout.TextTitle, Size: 24}},
 		layout.Label{},
-		layout.Label{Wrap: true, Text: "Approve Smolify as a speaker for your account. Open spotify.com/pair and enter:"},
+		layout.Label{Wrap: true, Text: "Approve Smolify as a speaker for your account. Open catalog.com/pair and enter:"},
 		layout.Label{},
 		layout.Label{Text: spaced(p.Code), Selectable: true, Style: layout.TextStyle{Bold: true, Size: 34, Fg: brand}},
 		layout.Label{},
@@ -154,7 +154,7 @@ func railView(s *State, g bool) layout.Node {
 			about += " · " + o
 		}
 		art := thumb(s, pl.Image, 32)
-		if s.username != "" && pl.URI == player.LikedSongs(s.username) {
+		if s.username != "" && pl.URI == model.LikedSongs(s.username) {
 			art = likedTile(32)
 		}
 		row := layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(railRowLines), Gap: 1, PadLeft: 1, PadRight: 1}, Align: layout.AlignCenter, Children: []layout.Node{
@@ -422,7 +422,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 	if pl.Image == "" {
 		wash = smolArt()
 	}
-	if s.username != "" && pl.URI == player.LikedSongs(s.username) {
+	if s.username != "" && pl.URI == model.LikedSongs(s.username) {
 		art, wash = likedTile(size), smolArt()
 	}
 	box := layout.Box{Background: s.tints[pl.Image], Round: true}
@@ -500,7 +500,7 @@ func virtualView(s *State, g bool, width int, title, sub string, field layout.No
 
 // trackTable is the selected list's tracks: number, title and artists,
 // album, liked, and duration.
-func trackTable(s *State, l player.Listing, listed bool, g bool, width int) layout.Node {
+func trackTable(s *State, l model.Listing, listed bool, g bool, width int) layout.Node {
 	if stage := s.likedLoads[s.shown]; stage != nil {
 		if !listed && stage.total == 0 && stage.offset == 0 && len(stage.tracks) == 0 {
 			if stage.err != "" {
@@ -509,7 +509,7 @@ func trackTable(s *State, l player.Listing, listed bool, g bool, width int) layo
 			return layout.Label{Text: "Loading Liked Songs…", Style: subtle}
 		}
 		if !listed {
-			l = player.Listing{URI: s.shown, Ready: true, Length: stage.total, Cached: len(stage.tracks), Tracks: stage.tracks}
+			l = model.Listing{URI: s.shown, Ready: true, Length: stage.total, Cached: len(stage.tracks), Tracks: stage.tracks}
 			listed = true
 		}
 	}
@@ -585,7 +585,7 @@ func (s *State) trackCells(g, dateColumn bool, num, art, title, album, date, lik
 
 // trackRow is track t at its original zero-based playlist position i: in two lines with its cover (one when
 // compact); the playing one washed in violet with bars for its number.
-func trackRow(s *State, i int, t player.Track, g, dateColumn bool) layout.Node {
+func trackRow(s *State, i int, t model.Track, g, dateColumn bool) layout.Node {
 	num := layout.Node(layout.Label{Text: strconv.Itoa(i + 1), Style: subtle})
 	requested := pendingTrack(s, t, s.shown)
 	if requested {
@@ -648,7 +648,7 @@ func trackRow(s *State, i int, t player.Track, g, dateColumn bool) layout.Node {
 
 // artistLine keeps each visible artist independently targetable while using
 // the same comma-separated text, truncation, and subdued style as the row.
-func artistLine(t player.Track, row int, fill bool) layout.Node {
+func artistLine(t model.Track, row int, fill bool) layout.Node {
 	style := secondary
 	style.Leading = rowLeading
 	base := layout.NodeBase{NoPadding: true}
@@ -705,7 +705,7 @@ func thumb(s *State, url string, size int) layout.Node {
 }
 
 // total is how long tracks last together: "52 min" or "3 h 12 min".
-func total(tracks []player.Track) string {
+func total(tracks []model.Track) string {
 	var d time.Duration
 	for _, t := range tracks {
 		d += t.Duration
@@ -938,7 +938,7 @@ func loadingView(s *State, g bool) layout.Node {
 }
 
 // repeatLabel is the repeat button's terminal text: ↻1 while one song repeats.
-func repeatLabel(r player.Repeat) string {
+func repeatLabel(r model.Repeat) string {
 	if r.Track {
 		return "↻1"
 	}
@@ -946,7 +946,7 @@ func repeatLabel(r player.Repeat) string {
 }
 
 // repeatTip names the mode the repeat button is in.
-func repeatTip(r player.Repeat) string {
+func repeatTip(r model.Repeat) string {
 	switch {
 	case r.Track:
 		return "Repeating this song (r)"

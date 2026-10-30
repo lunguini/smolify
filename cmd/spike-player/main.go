@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 // Command spike-player embeds go-librespot without a UI: it signs in with
 // Spotify's device pairing, lists the library's playlists, plays the first
 // one, prints the player's events, and pauses after a while. It proves the

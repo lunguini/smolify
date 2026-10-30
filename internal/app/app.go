@@ -17,17 +17,17 @@ import (
 	"github.com/lunguini/flatte/flatui"
 	"github.com/lunguini/flatte/flatui/layout"
 
+	"github.com/lunguini/smolify/internal/catalog"
 	"github.com/lunguini/smolify/internal/librarycache"
-	"github.com/lunguini/smolify/internal/player"
-	"github.com/lunguini/smolify/internal/spotify"
+	"github.com/lunguini/smolify/internal/model"
 )
 
-// Backend is the player as the UI uses it (player.Player, or a fake in
+// Backend is the player as the UI uses it (a model.Player adapter, or a fake in
 // tests). Requests block; the UI calls them off the loop.
 type Backend interface {
-	Events() <-chan player.Event
-	Status(ctx context.Context) (player.Status, error)
-	Playlists(ctx context.Context) ([]player.Playlist, error)
+	Events() <-chan model.Event
+	Status(ctx context.Context) (model.Status, error)
+	Playlists(ctx context.Context) ([]model.Playlist, error)
 	Play(ctx context.Context, uri, skipTo string) error
 	PlayPause(ctx context.Context) error
 	Next(ctx context.Context) error
@@ -35,35 +35,35 @@ type Backend interface {
 	Seek(ctx context.Context, position time.Duration) error
 	SetVolume(ctx context.Context, v int) error
 	SetShuffle(ctx context.Context, on bool) error
-	SetRepeat(ctx context.Context, r player.Repeat) error
-	ContextTracks(ctx context.Context, uri string) (player.Listing, error)
+	SetRepeat(ctx context.Context, r model.Repeat) error
+	ContextTracks(ctx context.Context, uri string) (model.Listing, error)
 	Queue(ctx context.Context, uri string) error
 	SetLiked(ctx context.Context, uris []string, liked bool) error
 	Liked(ctx context.Context, uris []string) ([]bool, error)
 	// Configure changes how the player plays, restarting its session.
-	Configure(ctx context.Context, a player.Audio) error
+	Configure(ctx context.Context, a model.Audio) error
 	SetDeviceName(ctx context.Context, name string) error
 	// SignOut forgets the sign-in; the player then reports Pairing.
 	SignOut(ctx context.Context) error
 	// RecentlyPlayed is the lists username played lately, newest first.
-	RecentlyPlayed(ctx context.Context, username string, limit int) ([]player.Played, error)
+	RecentlyPlayed(ctx context.Context, username string, limit int) ([]model.Played, error)
 }
 
-// Web is Spotify search as the UI uses it (spotify.Client, or a fake in tests).
+// Web is catalog search as the UI uses it (a provider client, or a fake).
 type Web interface {
-	Search(ctx context.Context, q string, limit int) (spotify.Results, error)
+	Search(ctx context.Context, q string, limit int) (catalog.Results, error)
 }
 
 type likedTracksWeb interface {
-	LikedTracks(ctx context.Context, offset, limit int) (spotify.SavedTracksPage, error)
+	LikedTracks(ctx context.Context, offset, limit int) (catalog.SavedTracksPage, error)
 }
 
 type likedLoad struct {
 	generation uint64
 	offset     int
 	total      int
-	tracks     []player.Track
-	original   *player.Listing
+	tracks     []model.Track
+	original   *model.Listing
 	restarts   int
 	failures   int
 	inFlight   bool
@@ -86,7 +86,7 @@ type State struct {
 	be              Backend
 	img             Images
 	web             Web
-	cache           *librarycache.Store
+	cache           librarycache.Cache
 	cacheEpoch      uint64
 	cacheLoaded     string
 	cacheRevision   map[string]uint64
@@ -100,10 +100,10 @@ type State struct {
 
 	// pairing is the sign-in code to show (zero: none); ready reports the
 	// player signed in.
-	pairing player.Pairing
+	pairing model.Pairing
 	ready   bool
 
-	track         *player.Track
+	track         *model.Track
 	mediaTrackURI string // latest URI confirmed by playback status/event, not Track metadata alone
 	mediaPlaying  bool   // backend-confirmed state; s.playing also includes optimistic UI changes
 	pending       *playIntent
@@ -112,18 +112,18 @@ type State struct {
 	volume        int
 	volMax        int
 	shuffle       bool
-	repeat        player.Repeat
+	repeat        model.Repeat
 	context       string // the playing context's URI
 
 	username  string // the signed-in account ("": not known yet)
-	playlists []player.Playlist
+	playlists []model.Playlist
 	rail      flatui.List
 	loaded    bool // the library has been read
 
 	// listings are context tracks by context URI, as far as listed; listing
 	// marks requests in flight. tracks is the track table's cursor over the
 	// selected list's listing, shown the URI it belongs to.
-	listings        map[string]player.Listing
+	listings        map[string]model.Listing
 	listing         map[string]bool
 	stale           map[string]bool // listed, but changed since: asked again until complete
 	likedLoads      map[string]*likedLoad
@@ -177,17 +177,16 @@ type State struct {
 	status string // the last error
 	notice string // the last confirmation ("Added to queue")
 
-	// settings are the Settings page's, saved at settingsPath ("": not
-	// saved); deviceName edits the device name; settingCursor is the row
+	// settings are the Settings page's and are saved through settingsStore;
+	// deviceName edits the device name; settingCursor is the row
 	// the keyboard is on and settingsScroll the page's scroll (at most
 	// settingsMax lines).
 	settings                    Settings
-	activeAudio                 player.Audio
+	activeAudio                 model.Audio
 	applyingAudio               bool
 	settingQuality              flatui.Select
 	settingCrossfade            flatui.Select
-	settingsPath                string
-	settingsWriter              *settingsWriter
+	settingsStore               SettingsStore
 	deviceName                  flatui.TextField
 	settingCursor               int
 	settingsScroll, settingsMax int
@@ -366,7 +365,7 @@ func New(be Backend, img Images, web Web, debug io.Writer) flatte.App[State] {
 	s := &State{
 		be: be, img: img, web: web, volMax: 100, debug: debug, searchDelay: 300 * time.Millisecond,
 		covers: map[string]image.Image{}, tints: map[string]color.Color{}, thumbs: map[string]image.Image{}, thumbing: map[string]bool{}, fetching: map[string]bool{},
-		listings: map[string]player.Listing{}, listing: map[string]bool{}, stale: map[string]bool{},
+		listings: map[string]model.Listing{}, listing: map[string]bool{}, stale: map[string]bool{},
 		likedLoads: map[string]*likedLoad{}, likedGeneration: map[string]uint64{},
 		liked: map[string]bool{}, asking: map[string]bool{}, likeChanges: map[string]*likeChange{},
 		page: pageHome, shown: uriHome, focus: paneTracks,
@@ -399,7 +398,7 @@ func followPlayer(s *State) {
 	scope := flatte.NewScope(s.fx, "player")
 	done := make(chan struct{})
 	s.playerEvents, s.playerEventsDone = scope, done
-	flatte.ScopeStream(scope, s.fx, func(ctx context.Context, send func(player.Event)) {
+	flatte.ScopeStream(scope, s.fx, func(ctx context.Context, send func(model.Event)) {
 		defer close(done)
 		for {
 			if ctx.Err() != nil {
@@ -462,20 +461,20 @@ func tell(s *State, msg string) {
 }
 
 // onPlayer folds a player event into state.
-func onPlayer(s *State, ev player.Event) {
+func onPlayer(s *State, ev model.Event) {
 	s.logf("event %T %+v", ev, ev)
 	switch e := ev.(type) {
-	case player.Pairing:
+	case model.Pairing:
 		s.pairing = e
-	case player.Ready:
-		s.pairing, s.ready = player.Pairing{}, true
+	case model.Ready:
+		s.pairing, s.ready = model.Pairing{}, true
 		if !s.loaded {
 			loadLibrary(s)
 			refreshStatus(s)
 		}
-	case player.WillPlay:
+	case model.WillPlay:
 		bindPendingPlay(s, e.URI, e.ContextURI)
-	case player.Track:
+	case model.Track:
 		enrichPendingPlay(s, e)
 		s.ready = true
 		if s.away && s.settings.NotifyTracks && (s.track == nil || s.track.URI != e.URI) {
@@ -486,8 +485,8 @@ func onPlayer(s *State, ev player.Event) {
 			s.context = e.ContextURI
 		}
 		fetchCover(s, e.Cover)
-		askLiked(s, []player.Track{e})
-	case player.Playing:
+		askLiked(s, []model.Track{e})
+	case model.Playing:
 		confirmPendingPlay(s, e)
 		if e.ContextURI != "" && e.ContextURI != s.context {
 			refreshModes(s)
@@ -497,23 +496,23 @@ func onPlayer(s *State, ev player.Event) {
 		if e.URI != "" {
 			s.mediaTrackURI = e.URI
 		}
-	case player.Paused:
+	case model.Paused:
 		s.playing, s.mediaPlaying = false, false
 		if e.URI != "" {
 			s.mediaTrackURI = e.URI
 		}
-	case player.Stopped:
+	case model.Stopped:
 		s.playing, s.mediaPlaying = false, false
 		s.mediaTrackURI = ""
-	case player.Seek:
+	case model.Seek:
 		s.position = e.Position
-	case player.Volume:
+	case model.Volume:
 		s.volume, s.volMax = e.Value, max(e.Max, 1)
-	case player.Shuffle:
+	case model.Shuffle:
 		s.shuffle = e.On
-	case player.Repeat:
+	case model.Repeat:
 		s.repeat = e
-	case player.PlaybackError:
+	case model.PlaybackError:
 		if loadingPlay(s) && !pendingMatches(s, e.URI, "") {
 			return
 		}
@@ -522,7 +521,7 @@ func onPlayer(s *State, ev player.Event) {
 		}
 		s.logf("playback error: uri=%s kind=%s unplayable=%v message=%q", e.URI, e.Kind, e.Unplayable, e.Message)
 		fail(s, playbackFailure(e))
-	case player.Failed:
+	case model.Failed:
 		s.playing = false
 		clearPendingPlay(s)
 		fail(s, "The player stopped: "+e.Err.Error())
@@ -540,9 +539,9 @@ func nonEmpty(a, b string) string {
 func loadLibrary(s *State) {
 	s.loaded = true
 	be := s.be
-	accountGo(s, "library", func(ctx context.Context) ([]player.Playlist, error) {
+	accountGo(s, "library", func(ctx context.Context) ([]model.Playlist, error) {
 		return be.Playlists(ctx)
-	}, func(s *State, pls []player.Playlist, err error) {
+	}, func(s *State, pls []model.Playlist, err error) {
 		if err != nil {
 			s.loaded = false
 			fail(s, "Could not load the library: "+err.Error())
@@ -558,7 +557,7 @@ func loadLibrary(s *State) {
 // playbackFailure explains a track that would not play. Spotify refusing
 // the track's key is told apart from a regional block: both arrive as
 // "restricted".
-func playbackFailure(e player.PlaybackError) string {
+func playbackFailure(e model.PlaybackError) string {
 	switch {
 	case strings.Contains(e.Message, "aes key"):
 		return "Could not play this track: Spotify refused its audio key (" + e.Message + ")."
@@ -569,23 +568,23 @@ func playbackFailure(e player.PlaybackError) string {
 }
 
 // nextRepeat cycles the repeat button: off, the whole list, one song.
-func nextRepeat(r player.Repeat) player.Repeat {
+func nextRepeat(r model.Repeat) model.Repeat {
 	switch {
 	case r.Track:
-		return player.Repeat{}
+		return model.Repeat{}
 	case r.Context:
-		return player.Repeat{Track: true}
+		return model.Repeat{Track: true}
 	}
-	return player.Repeat{Context: true}
+	return model.Repeat{Context: true}
 }
 
 // refreshModes rereads shuffle and repeat. Starting a context may turn them
 // off without the player reporting it (when the context forbids them).
 func refreshModes(s *State) {
 	be := s.be
-	accountGo(s, "modes", func(ctx context.Context) (player.Status, error) {
+	accountGo(s, "modes", func(ctx context.Context) (model.Status, error) {
 		return be.Status(ctx)
-	}, func(s *State, st player.Status, err error) {
+	}, func(s *State, st model.Status, err error) {
 		if err == nil {
 			s.shuffle, s.repeat = st.Shuffle, st.Repeat
 		}
@@ -596,9 +595,9 @@ func refreshModes(s *State) {
 // volume and modes).
 func refreshStatus(s *State) {
 	be := s.be
-	accountGo(s, "status", func(ctx context.Context) (player.Status, error) {
+	accountGo(s, "status", func(ctx context.Context) (model.Status, error) {
 		return be.Status(ctx)
-	}, func(s *State, st player.Status, err error) {
+	}, func(s *State, st model.Status, err error) {
 		if err != nil {
 			return // events will tell
 		}
@@ -616,7 +615,7 @@ func refreshStatus(s *State) {
 		if st.Track != nil {
 			s.track, s.position = st.Track, st.Track.Position
 			fetchCover(s, st.Track.Cover)
-			askLiked(s, []player.Track{*st.Track})
+			askLiked(s, []model.Track{*st.Track})
 		}
 		if st.Username != "" && s.username == "" {
 			s.username = st.Username
@@ -645,12 +644,12 @@ func libraryChanged(s *State) {
 
 // library is the rail's entries: Liked Songs (once the account is known),
 // then the playlists.
-func (s *State) library() []player.Playlist {
+func (s *State) library() []model.Playlist {
 	if s.username == "" {
 		return s.playlists
 	}
-	liked := player.Playlist{URI: player.LikedSongs(s.username), Name: "Liked Songs", Owner: s.username}
-	return append([]player.Playlist{liked}, s.playlists...)
+	liked := model.Playlist{URI: model.LikedSongs(s.username), Name: "Liked Songs", Owner: s.username}
+	return append([]model.Playlist{liked}, s.playlists...)
 }
 
 // loadTracks asks for the tracks of the context uri, unless they are
@@ -671,7 +670,7 @@ func loadTracks(s *State, uri string) {
 	}
 	s.listing[uri] = true
 	be := s.be
-	accountGo(s, "tracks", func(ctx context.Context) (player.Listing, error) { return be.ContextTracks(ctx, uri) }, func(s *State, l player.Listing, err error) {
+	accountGo(s, "tracks", func(ctx context.Context) (model.Listing, error) { return be.ContextTracks(ctx, uri) }, func(s *State, l model.Listing, err error) {
 		delete(s.listing, uri)
 		if err != nil {
 			s.logf("tracks %s: %v", uri, err)
@@ -710,9 +709,9 @@ func loadLikedTracks(s *State, uri string) {
 	generation := stage.generation
 	offset := stage.offset
 	stage.inFlight = true
-	accountGo(s, "liked-tracks:"+uri, func(ctx context.Context) (spotify.SavedTracksPage, error) {
+	accountGo(s, "liked-tracks:"+uri, func(ctx context.Context) (catalog.SavedTracksPage, error) {
 		return web.LikedTracks(ctx, offset, likedPageSize)
-	}, func(s *State, page spotify.SavedTracksPage, err error) {
+	}, func(s *State, page catalog.SavedTracksPage, err error) {
 		current := s.likedLoads[uri]
 		if current == nil || current.generation != generation || s.likedGeneration[uri] != generation {
 			return
@@ -774,12 +773,12 @@ func loadLikedTracks(s *State, uri string) {
 		current.offset += len(page.Items)
 		if current.offset < current.total && len(page.Items) > 0 {
 			if current.original == nil {
-				replaceListing(s, uri, player.Listing{URI: uri, Ready: true, Length: current.total, Cached: len(current.tracks), Tracks: slices.Clone(current.tracks)})
+				replaceListing(s, uri, model.Listing{URI: uri, Ready: true, Length: current.total, Cached: len(current.tracks), Tracks: slices.Clone(current.tracks)})
 			}
 			loadLikedTracks(s, uri)
 			return
 		}
-		listing := player.Listing{URI: uri, Ready: true, Length: current.total, Cached: len(current.tracks), Tracks: current.tracks}
+		listing := model.Listing{URI: uri, Ready: true, Length: current.total, Cached: len(current.tracks), Tracks: current.tracks}
 		allIdentified := true
 		pageLiked := make(map[string]bool, len(listing.Tracks))
 		for _, track := range listing.Tracks {
@@ -815,25 +814,28 @@ func resetLikedPageStage(s *State, uri string, stage *likedLoad) {
 	}
 }
 
-func savedTrack(saved spotify.SavedTrack) player.Track {
+func savedTrack(saved catalog.SavedTrack) model.Track {
 	track := saved.Track
 	artists, artistURIs := make([]string, 0, len(track.Artists)), make([]string, 0, len(track.Artists))
 	for _, artist := range track.Artists {
 		artists = append(artists, artist.Name)
 		artistURIs = append(artistURIs, artist.URI)
 	}
-	return player.Track{
+	return model.Track{
 		URI: track.URI, Name: track.Name, Artists: artists, ArtistURIs: artistURIs,
 		Album: track.Album.Name, AlbumURI: track.Album.URI,
-		Cover: spotify.Cover(track.Album.Images, 128), Duration: time.Duration(track.DurationMS) * time.Millisecond,
+		Cover: catalog.Cover(track.Album.Images, 128), Duration: time.Duration(track.DurationMS) * time.Millisecond,
 		AddedAt: saved.AddedAt,
 	}
 }
 
 func likedRetryDelay(err error, failures int) time.Duration {
-	var spotifyErr spotify.Error
-	if errors.As(err, &spotifyErr) && spotifyErr.Status == 429 {
-		if seconds, parseErr := time.ParseDuration(spotifyErr.RetryAfter + "s"); parseErr == nil && seconds > 0 {
+	var rateLimit interface {
+		HTTPStatus() int
+		RetryAfterValue() string
+	}
+	if errors.As(err, &rateLimit) && rateLimit.HTTPStatus() == 429 {
+		if seconds, parseErr := time.ParseDuration(rateLimit.RetryAfterValue() + "s"); parseErr == nil && seconds > 0 {
 			return seconds
 		}
 	}
@@ -841,7 +843,7 @@ func likedRetryDelay(err error, failures int) time.Duration {
 }
 
 // askLiked asks whether the tracks not known yet are in Liked Songs.
-func askLiked(s *State, tracks []player.Track) {
+func askLiked(s *State, tracks []model.Track) {
 	var uris []string
 	for _, t := range tracks {
 		_, known := s.liked[t.URI]
@@ -869,7 +871,7 @@ func askLiked(s *State, tracks []player.Track) {
 	})
 }
 
-func indexOf(tracks []player.Track, uri string) int {
+func indexOf(tracks []model.Track, uri string) int {
 	for i, t := range tracks {
 		if t.URI == uri {
 			return i
@@ -879,8 +881,8 @@ func indexOf(tracks []player.Track, uri string) int {
 }
 
 // withLiked is Liked Songs listing l with t added at the top, or removed.
-func withLiked(l player.Listing, t player.Track, on bool) player.Listing {
-	tracks := make([]player.Track, 0, len(l.Tracks)+1)
+func withLiked(l model.Listing, t model.Track, on bool) model.Listing {
+	tracks := make([]model.Track, 0, len(l.Tracks)+1)
 	if on && indexOf(l.Tracks, t.URI) < 0 {
 		tracks = append(tracks, t)
 	}
@@ -989,7 +991,7 @@ func send(s *State, name string, req func(context.Context, Backend) error) {
 			followPlayer(s)
 		}
 		s.logf("request %s: err=%v", name, err)
-		if err != nil && !errors.Is(err, player.ErrSuperseded) { // a newer command took over
+		if err != nil && !errors.Is(err, model.ErrSuperseded) { // a newer command took over
 			fail(s, "Could not "+strings.ReplaceAll(name, "-", " ")+": "+err.Error())
 			if name == "sign-out" {
 				loadLibrary(s)
@@ -1006,33 +1008,33 @@ func sendLatest(s *State, name string, req func(context.Context, Backend) error)
 		return struct{}{}, req(ctx, be)
 	}, func(s *State, _ struct{}, err error) {
 		s.logf("request %s: err=%v", name, err)
-		if err != nil && !errors.Is(err, player.ErrSuperseded) && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, model.ErrSuperseded) && !errors.Is(err, context.Canceled) {
 			fail(s, "Could not "+strings.ReplaceAll(name, "-", " ")+": "+err.Error())
 		}
 	})
 }
 
 // selected is the list under the rail's cursor.
-func (s *State) selected() (player.Playlist, bool) {
+func (s *State) selected() (model.Playlist, bool) {
 	if s.page == pageBrowse {
 		return browseSelected(s)
 	}
 	lib := s.library()
 	i := s.rail.Cursor()
 	if i < 0 || i >= len(lib) {
-		return player.Playlist{}, false
+		return model.Playlist{}, false
 	}
 	return lib[i], true
 }
 
 // selectedTrack is the track under the table's cursor, in the selected
 // list.
-func (s *State) selectedTrack() (player.Track, bool) {
+func (s *State) selectedTrack() (model.Track, bool) {
 	l, ok := s.listings[s.shown]
 	l = displayListing(s, l)
 	i := s.tracks.Cursor()
 	if !ok || i < 0 || i >= len(l.Tracks) {
-		return player.Track{}, false
+		return model.Track{}, false
 	}
 	return l.Tracks[i], true
 }
@@ -1120,7 +1122,7 @@ func command(s *State, id string, fx flatte.Effects[State]) {
 		if !ok || loadingPlaylist(s, pl.URI) {
 			return
 		}
-		var first player.Track
+		var first model.Track
 		if l := s.listings[pl.URI]; !s.shuffle && len(l.Tracks) > 0 {
 			first = l.Tracks[0]
 		}
@@ -1397,9 +1399,9 @@ func openHome(s *State) {
 	}
 	s.discovery.RecentRequested = true
 	be, user := s.be, s.username
-	accountLatest(s, "home", func(ctx context.Context) ([]player.Track, error) {
+	accountLatest(s, "home", func(ctx context.Context) ([]model.Track, error) {
 		return recentTracks(ctx, be, user)
-	}, func(s *State, tracks []player.Track, err error) {
+	}, func(s *State, tracks []model.Track, err error) {
 		if err != nil {
 			if len(tracks) > 0 {
 				setVirtual(s, uriHome, tracks)
@@ -1418,21 +1420,21 @@ const homeLists = 20
 // recentTracks are the tracks last played in the lists played lately,
 // each once, played where it was played from. A list the player cannot
 // list, or whose track it no longer has, is left out.
-func recentTracks(ctx context.Context, be Backend, user string) ([]player.Track, error) {
+func recentTracks(ctx context.Context, be Backend, user string) ([]model.Track, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	played, err := be.RecentlyPlayed(ctx, user, homeLists)
 	if err != nil {
 		return nil, err
 	}
-	found := map[string]player.Track{}
+	found := map[string]model.Track{}
 	finished := map[int]bool{}
 	for {
 		if err := ctx.Err(); err != nil {
 			return recentResult(played, found, err)
 		}
 		pending := false
-		listings := map[string]player.Listing{}
+		listings := map[string]model.Listing{}
 		for i, p := range played {
 			if p.TrackURI == "" || finished[i] || found[p.TrackURI].URI != "" {
 				continue
@@ -1478,12 +1480,12 @@ func recentTracks(ctx context.Context, be Backend, user string) ([]player.Track,
 	return recentResult(played, found, nil)
 }
 
-func recentResult(played []player.Played, found map[string]player.Track, err error) ([]player.Track, error) {
+func recentResult(played []model.Played, found map[string]model.Track, err error) ([]model.Track, error) {
 	if errors.Is(err, context.Canceled) {
 		return nil, err
 	}
 	seen := map[string]bool{}
-	var out []player.Track
+	var out []model.Track
 	for _, p := range played {
 		if t, ok := found[p.TrackURI]; ok && !seen[p.TrackURI] {
 			out = append(out, t)
@@ -1500,8 +1502,8 @@ func openSearch(s *State) {
 }
 
 // setVirtual sets the listing of Home or search to tracks.
-func setVirtual(s *State, uri string, tracks []player.Track) {
-	s.listings[uri] = player.Listing{URI: uri, Ready: true, Length: len(tracks), Cached: len(tracks), Tracks: tracks}
+func setVirtual(s *State, uri string, tracks []model.Track) {
+	s.listings[uri] = model.Listing{URI: uri, Ready: true, Length: len(tracks), Cached: len(tracks), Tracks: tracks}
 	if s.shown == uri {
 		s.tracks.SetCount(len(tracks))
 		s.tracks.Select(0)
@@ -1625,16 +1627,16 @@ func search(s *State, delay time.Duration) {
 		s.tracks.SetCount(0)
 	}
 	web := s.web
-	accountLatest(s, "search", func(ctx context.Context) (spotify.Results, error) {
+	accountLatest(s, "search", func(ctx context.Context) (catalog.Results, error) {
 		if delay > 0 {
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
-				return spotify.Results{}, ctx.Err()
+				return catalog.Results{}, ctx.Err()
 			}
 		}
 		return web.Search(ctx, q, 30)
-	}, func(s *State, r spotify.Results, err error) {
+	}, func(s *State, r catalog.Results, err error) {
 		s.searchPending = false
 		s.logf("search %q: %d tracks, err=%v", q, len(r.Tracks), err)
 		if err != nil {
@@ -1643,7 +1645,7 @@ func search(s *State, delay time.Duration) {
 			return
 		}
 		s.status = ""
-		tracks := make([]player.Track, len(r.Tracks))
+		tracks := make([]model.Track, len(r.Tracks))
 		for i, t := range r.Tracks {
 			tracks[i] = trackFrom(t)
 		}
@@ -1652,10 +1654,10 @@ func search(s *State, delay time.Duration) {
 }
 
 // trackFrom converts search metadata to a player track.
-func trackFrom(t spotify.Track) player.Track {
-	out := player.Track{
+func trackFrom(t catalog.Track) model.Track {
+	out := model.Track{
 		URI: t.URI, Name: t.Name, Album: t.Album.Name, AlbumURI: t.Album.URI,
-		Duration: time.Duration(t.DurationMS) * time.Millisecond, Cover: spotify.Cover(t.Album.Images, 128),
+		Duration: time.Duration(t.DurationMS) * time.Millisecond, Cover: catalog.Cover(t.Album.Images, 128),
 	}
 	for _, a := range t.Artists {
 		out.Artists = append(out.Artists, a.Name)

@@ -2,22 +2,22 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui"
 	"github.com/lunguini/flatte/flatui/layout"
 
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
+
+// SettingsStore persists user preferences for the current host.
+type SettingsStore interface {
+	Save(Settings) error
+}
 
 // Settings are what the Settings page changes, kept in settings.json next
 // to the player's state.
@@ -43,82 +43,16 @@ func DefaultSettings() Settings {
 }
 
 // Audio is how the settings ask the player to play.
-func (st Settings) Audio() player.Audio {
-	return player.Audio{Bitrate: st.Bitrate, Normalise: st.Normalise, Crossfade: time.Duration(st.Crossfade) * time.Second, Autoplay: st.Autoplay}
+func (st Settings) Audio() model.Audio {
+	return model.Audio{Bitrate: st.Bitrate, Normalise: st.Normalise, Crossfade: time.Duration(st.Crossfade) * time.Second, Autoplay: st.Autoplay}
 }
 
-// SettingsPath is where settings live in dir (the player's state dir).
-func SettingsPath(dir string) string { return filepath.Join(dir, "settings.json") }
-
-// LoadSettings reads the settings at path: the defaults when there are
-// none yet, with any setting the file lacks at its default.
-func LoadSettings(path string) (Settings, error) {
-	st := DefaultSettings()
-	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return st, nil
-	}
-	if err != nil {
-		return st, err
-	}
-	if err := json.Unmarshal(b, &st); err != nil {
-		return DefaultSettings(), err
-	}
-	if strings.TrimSpace(st.DeviceName) == "" {
-		st.DeviceName = DefaultSettings().DeviceName
-	}
-	return st, nil
-}
-
-// saveSettings writes st to path atomically (0600).
-func saveSettings(path string, st Settings) error {
-	b, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
-}
-
-// settingsWriter serializes disk writes and skips snapshots superseded
-// before their worker starts. Revisions are assigned on the app loop.
-type settingsWriter struct {
-	path   string
-	latest atomic.Uint64
-	mu     sync.Mutex
-}
-
-func (w *settingsWriter) prepare(st Settings) func() error {
-	revision := w.latest.Add(1)
-	return func() error {
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		if revision != w.latest.Load() {
-			return nil
-		}
-		return saveSettings(w.path, st)
-	}
-}
-
-// WithSettings is app with settings st, saved to path as they change
-// ("": not saved, as in tests).
-func WithSettings(app flatte.App[State], path string, st Settings) flatte.App[State] {
+// WithSettingsStore installs host storage and applies the loaded settings.
+func WithSettingsStore(app flatte.App[State], store SettingsStore, st Settings) flatte.App[State] {
 	s := app.State
-	s.settings, s.settingsPath, s.compact = st, path, st.Compact
+	s.settings, s.settingsStore, s.compact = st, store, st.Compact
 	s.activeAudio = st.Audio()
 	initAudioSettings(s)
-	s.settingsWriter = &settingsWriter{path: path}
 	s.deviceName = flatui.TextField{Value: st.DeviceName, Cursor: len(st.DeviceName)}
 	return app
 }
@@ -229,7 +163,7 @@ func applyAudioSettings(s *State) {
 	}, func(s *State, _ struct{}, err error) {
 		s.applyingAudio = false
 		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, player.ErrSuperseded) {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, model.ErrSuperseded) {
 				fail(s, "Could not apply audio settings: "+err.Error())
 			}
 			return
@@ -253,13 +187,9 @@ func applySettings(s *State, st Settings) {
 		name := st.DeviceName
 		sendLatest(s, "rename-device", func(ctx context.Context, be Backend) error { return be.SetDeviceName(ctx, name) })
 	}
-	if path := s.settingsPath; path != "" {
-		if s.settingsWriter == nil {
-			s.settingsWriter = &settingsWriter{path: path}
-		}
-		save := s.settingsWriter.prepare(st)
+	if store := s.settingsStore; store != nil {
 		flatte.Go(s.fx, "save-settings", func(context.Context) (struct{}, error) {
-			return struct{}{}, save()
+			return struct{}{}, store.Save(st)
 		}, func(s *State, _ struct{}, err error) {
 			if err != nil {
 				fail(s, "Could not save the settings: "+err.Error())

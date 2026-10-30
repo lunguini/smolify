@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 package spotify
 
 import (
@@ -7,41 +9,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lunguini/smolify/internal/catalog"
 )
 
-// HomeFeed is Spotify's personalized Home response, normalized to playable
-// catalog cards. Unsupported cards are omitted instead of inventing URIs.
-type HomeFeed struct {
-	Greeting string
-	Sections []HomeSection
-}
-
-type HomeSection struct {
-	URI   string
-	Title string
-	Items []HomeItem
-}
-
-// HomeItem is a playlist, album, artist, or track shown on Home.
-type HomeItem struct {
-	URI, Name, Kind, Image string
-	Artists                []Artist
-}
-
-// ArtistOverview carries the header and Spotify's popular tracks for an
-// artist. The private API may omit either field for unavailable artists.
-type ArtistOverview struct {
-	Artist    Artist
-	Image     string
-	TopTracks []Track
-}
-
-// AlbumDetails contains album metadata and its first bounded track page.
-type AlbumDetails struct {
-	Album  Album
-	Tracks []Track
-	Total  int
-}
+type HomeFeed = catalog.HomeFeed
+type HomeSection = catalog.HomeSection
+type HomeItem = catalog.HomeItem
+type ArtistOverview = catalog.ArtistOverview
+type AlbumDetails = catalog.AlbumDetails
 
 // Home reads Spotify's own personalized Home shelves. sectionItemsLimit is
 // deliberately bounded to keep the response small.

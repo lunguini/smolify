@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 // Command spike-web probes which of Spotify's internal endpoints answer the
 // player's token for search and recently played, so Smolify can do both
 // without the Web API's developer quotas. It prints each endpoint's status

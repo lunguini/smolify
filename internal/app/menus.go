@@ -1,13 +1,11 @@
 package app
 
 import (
-	"context"
-	"os/exec"
 	"strings"
 
 	"github.com/lunguini/flatte"
 
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 func key(k flatte.Key, mod flatte.Mod) flatte.KeyEvent { return flatte.KeyEvent{Key: k, Mod: mod} }
@@ -119,20 +117,6 @@ func likeLabel(liked bool) string {
 	return "Save to Liked Songs"
 }
 
-// openURL opens url in the default browser.
-func openURL(s *State, url string) {
-	if url == "" {
-		return
-	}
-	flatte.Go(s.fx, "open-url", func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, exec.CommandContext(ctx, "open", url).Run()
-	}, func(s *State, _ struct{}, err error) {
-		if err != nil {
-			fail(s, "Could not open the browser: "+err.Error())
-		}
-	})
-}
-
 // editingKey is a key a text field uses with any modifier.
 func editingKey(k flatte.Key) bool {
 	switch k {
@@ -143,7 +127,7 @@ func editingKey(k flatte.Key) bool {
 }
 
 // repeatMenu labels the repeat item with the mode it is in.
-func repeatMenu(r player.Repeat) string {
+func repeatMenu(r model.Repeat) string {
 	if r.Track {
 		return "Repeat One"
 	}

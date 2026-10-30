@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lunguini/smolify/internal/player"
-	"github.com/lunguini/smolify/internal/spotify"
+	"github.com/lunguini/smolify/internal/catalog"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 const uriRadioPrefix = "spotify:station:track:"
@@ -55,12 +55,12 @@ func openBrowse(s *State, uri, name, cover string) {
 }
 
 // browseSelected exposes the active browse header to the shared playlist frame.
-func browseSelected(s *State) (player.Playlist, bool) {
+func browseSelected(s *State) (model.Playlist, bool) {
 	p, ok := s.discovery.Pages[s.shown]
 	if !ok || s.page != pageBrowse {
-		return player.Playlist{}, false
+		return model.Playlist{}, false
 	}
-	return player.Playlist{URI: p.URI, Name: p.Name, Image: p.Image, Length: s.listings[s.shown].Length}, true
+	return model.Playlist{URI: p.URI, Name: p.Name, Image: p.Image, Length: s.listings[s.shown].Length}, true
 }
 
 func loadBrowseContext(s *State, uri string) {
@@ -68,7 +68,7 @@ func loadBrowseContext(s *State, uri string) {
 	p.Loading, p.Err = true, ""
 	s.discovery.Pages[uri] = p
 	be := s.be
-	accountLatest(s, "browse-"+uri, func(ctx context.Context) (player.Listing, error) { return be.ContextTracks(ctx, uri) }, func(s *State, listing player.Listing, err error) {
+	accountLatest(s, "browse-"+uri, func(ctx context.Context) (model.Listing, error) { return be.ContextTracks(ctx, uri) }, func(s *State, listing model.Listing, err error) {
 		p := s.discovery.Pages[uri]
 		p.Loading = false
 		if err != nil {
@@ -95,18 +95,18 @@ func loadArtistPage(s *State, uri string) {
 	p := s.discovery.Pages[uri]
 	p.Loading = true
 	s.discovery.Pages[uri] = p
-	accountLatest(s, "browse-"+uri, func(ctx context.Context) (spotify.ArtistOverview, error) { return web.Artist(ctx, uri) }, func(s *State, value spotify.ArtistOverview, err error) {
+	accountLatest(s, "browse-"+uri, func(ctx context.Context) (catalog.ArtistOverview, error) { return web.Artist(ctx, uri) }, func(s *State, value catalog.ArtistOverview, err error) {
 		p := s.discovery.Pages[uri]
 		p.Loading = false
 		if err != nil {
 			p.Err = err.Error()
 		} else {
 			p.Name, p.Image = value.Artist.Name, value.Image
-			tracks := make([]player.Track, 0, len(value.TopTracks))
+			tracks := make([]model.Track, 0, len(value.TopTracks))
 			for _, t := range value.TopTracks {
-				tracks = append(tracks, player.Track{URI: t.URI, Name: t.Name, Duration: timeDurationMS(t.DurationMS), Album: t.Album.Name, AlbumURI: t.Album.URI, Artists: artistNames(t.Artists), ArtistURIs: artistURIs(t.Artists), Cover: spotify.Cover(t.Album.Images, 128)})
+				tracks = append(tracks, model.Track{URI: t.URI, Name: t.Name, Duration: timeDurationMS(t.DurationMS), Album: t.Album.Name, AlbumURI: t.Album.URI, Artists: artistNames(t.Artists), ArtistURIs: artistURIs(t.Artists), Cover: catalog.Cover(t.Album.Images, 128)})
 			}
-			showDiscoveryListing(s, uri, player.Listing{URI: uri, Ready: true, Length: len(tracks), Cached: len(tracks), Tracks: tracks})
+			showDiscoveryListing(s, uri, model.Listing{URI: uri, Ready: true, Length: len(tracks), Cached: len(tracks), Tracks: tracks})
 			p.Err = ""
 			askLiked(s, tracks)
 		}
@@ -124,19 +124,19 @@ func loadAlbumPage(s *State, uri string) {
 	p := s.discovery.Pages[uri]
 	p.Loading = true
 	s.discovery.Pages[uri] = p
-	accountLatest(s, "browse-"+uri, func(ctx context.Context) (spotify.AlbumDetails, error) { return web.Album(ctx, uri) }, func(s *State, value spotify.AlbumDetails, err error) {
+	accountLatest(s, "browse-"+uri, func(ctx context.Context) (catalog.AlbumDetails, error) { return web.Album(ctx, uri) }, func(s *State, value catalog.AlbumDetails, err error) {
 		p := s.discovery.Pages[uri]
 		p.Loading = false
 		if err != nil {
 			p.Err = err.Error()
 		} else {
 			p.Album = &value
-			p.Name, p.Image = value.Album.Name, spotify.Cover(value.Album.Images, 256)
-			tracks := make([]player.Track, 0, len(value.Tracks))
+			p.Name, p.Image = value.Album.Name, catalog.Cover(value.Album.Images, 256)
+			tracks := make([]model.Track, 0, len(value.Tracks))
 			for _, t := range value.Tracks {
-				tracks = append(tracks, player.Track{URI: t.URI, Name: t.Name, Duration: timeDurationMS(t.DurationMS), Album: value.Album.Name, AlbumURI: uri, Artists: artistNames(t.Artists), ArtistURIs: artistURIs(t.Artists), Cover: p.Image})
+				tracks = append(tracks, model.Track{URI: t.URI, Name: t.Name, Duration: timeDurationMS(t.DurationMS), Album: value.Album.Name, AlbumURI: uri, Artists: artistNames(t.Artists), ArtistURIs: artistURIs(t.Artists), Cover: p.Image})
 			}
-			showDiscoveryListing(s, uri, player.Listing{URI: uri, Ready: true, Length: value.Total, Cached: len(tracks), Tracks: tracks})
+			showDiscoveryListing(s, uri, model.Listing{URI: uri, Ready: true, Length: value.Total, Cached: len(tracks), Tracks: tracks})
 			p.Err = ""
 			askLiked(s, tracks)
 		}
@@ -145,7 +145,7 @@ func loadAlbumPage(s *State, uri string) {
 	})
 }
 
-func showDiscoveryListing(s *State, uri string, listing player.Listing) {
+func showDiscoveryListing(s *State, uri string, listing model.Listing) {
 	replaceListing(s, uri, listing)
 	delete(s.stale, uri)
 	saveCache(s)
@@ -222,7 +222,7 @@ func discoveryCommand(s *State, id string) bool {
 	}
 	visit(s)
 	openBrowse(s, uri, t.Name+" Radio", t.Cover)
-	requestPlay(s, uri, "", player.Track{})
+	requestPlay(s, uri, "", model.Track{})
 	return true
 }
 
@@ -259,14 +259,14 @@ func validBrowseURI(uri string) bool {
 	return false
 }
 
-func artistNames(in []spotify.Artist) []string {
+func artistNames(in []catalog.Artist) []string {
 	out := make([]string, 0, len(in))
 	for _, a := range in {
 		out = append(out, a.Name)
 	}
 	return out
 }
-func artistURIs(in []spotify.Artist) []string {
+func artistURIs(in []catalog.Artist) []string {
 	out := make([]string, 0, len(in))
 	for _, a := range in {
 		out = append(out, a.URI)
@@ -277,13 +277,13 @@ func timeDurationMS(ms int) time.Duration { return time.Duration(ms) * time.Mill
 
 // playbackSource names the confirmed playback context, independently of the
 // page currently being browsed. Never infer a playlist from the album alone.
-func playbackSource(s *State) (player.Playlist, string) {
+func playbackSource(s *State) (model.Playlist, string) {
 	if s.track == nil {
-		return player.Playlist{}, "Playlist"
+		return model.Playlist{}, "Playlist"
 	}
 	uri := nonEmpty(s.context, s.track.ContextURI)
 	if uri == "" {
-		return player.Playlist{}, "Playlist"
+		return model.Playlist{}, "Playlist"
 	}
 	for _, list := range s.library() {
 		if list.URI == uri {
@@ -291,7 +291,7 @@ func playbackSource(s *State) (player.Playlist, string) {
 		}
 	}
 	if !validBrowseURI(uri) {
-		return player.Playlist{}, "Playlist"
+		return model.Playlist{}, "Playlist"
 	}
 	label := "Playlist"
 	if strings.HasPrefix(uri, "spotify:album:") {
@@ -303,7 +303,7 @@ func playbackSource(s *State) (player.Playlist, string) {
 	if strings.HasPrefix(uri, uriRadioPrefix) {
 		label = "Radio"
 	}
-	source := player.Playlist{URI: uri}
+	source := model.Playlist{URI: uri}
 	if page, ok := s.discovery.Pages[uri]; ok {
 		source.Name, source.Image = page.Name, page.Image
 	}

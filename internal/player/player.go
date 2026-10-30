@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 // Package player embeds go-librespot as Smolify's player: a Spotify Connect
 // device that plays through the Mac's audio output, driven in-process —
 // requests go to it over a channel and its events come back on Events, with
@@ -16,6 +18,8 @@ import (
 
 	"github.com/devgianlu/go-librespot/daemon"
 	"github.com/sirupsen/logrus"
+
+	"github.com/lunguini/smolify/internal/model"
 )
 
 // Options configures the player.
@@ -31,21 +35,8 @@ type Options struct {
 	Audio Audio
 }
 
-// Audio is how the player plays. Changing it (Configure) restarts the
-// session, so it is not something to change per track.
-type Audio struct {
-	// Bitrate is the stream quality in kbps: 96, 160, or 320 (others: 320).
-	Bitrate int
-	// Normalise evens out loudness between tracks.
-	Normalise bool
-	// Crossfade blends the end of a track into the next (0: none).
-	Crossfade time.Duration
-	// Autoplay keeps playing similar songs when a list ends.
-	Autoplay bool
-}
-
 // bitrate is a's bitrate, 320 unless it is one Spotify streams.
-func (a Audio) bitrate() int {
+func audioBitrate(a model.Audio) int {
 	switch a.Bitrate {
 	case 96, 160:
 		return a.Bitrate
@@ -170,7 +161,7 @@ func (p *Player) launch() error {
 			DeviceName:            opts.DeviceName,
 			DeviceType:            "computer",
 			AudioBackend:          "audio-toolbox",
-			Bitrate:               opts.Audio.bitrate(),
+			Bitrate:               audioBitrate(opts.Audio),
 			NormalisationDisabled: !opts.Audio.Normalise,
 			CrossfadeDuration:     int(opts.Audio.Crossfade / time.Millisecond),
 			DisableAutoplay:       !opts.Audio.Autoplay,
@@ -384,7 +375,7 @@ drained:
 
 // ErrSuperseded reports a command a newer one replaced before it ran: the
 // newer one's result is what counts.
-var ErrSuperseded = daemon.ErrSuperseded
+var ErrSuperseded = model.ErrSuperseded
 
 // request sends one request and waits for its reply.
 func (p *Player) request(ctx context.Context, t daemon.ApiRequestType, data any) (any, error) {
@@ -394,7 +385,11 @@ func (p *Player) request(ctx context.Context, t daemon.ApiRequestType, data any)
 	if closed || session == nil {
 		return nil, errors.New("player: closed")
 	}
-	return session.request(ctx, t, data)
+	v, err := session.request(ctx, t, data)
+	if errors.Is(err, daemon.ErrSuperseded) {
+		return nil, model.ErrSuperseded
+	}
+	return v, err
 }
 
 func (s *playerSession) waitReady(ctx context.Context) error {
@@ -428,34 +423,23 @@ func (s *playerSession) request(ctx context.Context, t daemon.ApiRequestType, da
 	return wait(requestCtx)
 }
 
-// Status is the player's state now.
-type Status struct {
-	Username            string
-	Track               *Track
-	Paused, Stopped     bool
-	Volume, VolumeSteps int
-	Shuffle             bool
-	Repeat              Repeat
-	ContextURI          string
-}
-
-func (p *Player) Status(ctx context.Context) (Status, error) {
+func (p *Player) Status(ctx context.Context) (model.Status, error) {
 	v, err := p.request(ctx, daemon.ApiRequestTypeStatus, nil)
 	if err != nil {
-		return Status{}, err
+		return model.Status{}, err
 	}
 	return statusOf(v)
 }
 
-func statusOf(v any) (Status, error) {
+func statusOf(v any) (model.Status, error) {
 	s, ok := v.(*daemon.ApiStatus)
 	if !ok {
-		return Status{}, fmt.Errorf("player: unexpected status %T", v)
+		return model.Status{}, fmt.Errorf("player: unexpected status %T", v)
 	}
-	st := Status{
+	st := model.Status{
 		Username: s.Username, Paused: s.Paused, Stopped: s.Stopped,
 		Volume: int(s.Volume), VolumeSteps: int(s.VolumeSteps), Shuffle: s.ShuffleContext,
-		Repeat: Repeat{Context: s.RepeatContext, Track: s.RepeatTrack},
+		Repeat: model.Repeat{Context: s.RepeatContext, Track: s.RepeatTrack},
 	}
 	if s.ContextUri != nil {
 		st.ContextURI = *s.ContextUri
@@ -467,17 +451,9 @@ func statusOf(v any) (Status, error) {
 	return st, nil
 }
 
-// Playlist is a playlist in the user's library.
-type Playlist struct {
-	URI, Name, Description, Owner string
-	Image                         string // cover URL ("": a mosaic in Spotify's apps)
-	Length                        int
-	Folder                        []string
-}
-
 // Playlists is the user's whole library of playlists, in library order.
-func (p *Player) Playlists(ctx context.Context) ([]Playlist, error) {
-	var out []Playlist
+func (p *Player) Playlists(ctx context.Context) ([]model.Playlist, error) {
+	var out []model.Playlist
 	for offset := 0; ; {
 		v, err := p.request(ctx, daemon.ApiRequestTypeLibraryPlaylists, daemon.ApiRequestDataLibraryPlaylists{Offset: offset, Limit: 100})
 		if err != nil {
@@ -488,7 +464,7 @@ func (p *Player) Playlists(ctx context.Context) ([]Playlist, error) {
 			return nil, fmt.Errorf("player: unexpected playlists %T", v)
 		}
 		for _, pl := range page.Items {
-			x := Playlist{URI: pl.Uri, Name: pl.Name, Description: pl.Description, Owner: pl.OwnerUsername, Length: int(pl.Length), Folder: pl.Folder}
+			x := model.Playlist{URI: pl.Uri, Name: pl.Name, Description: pl.Description, Owner: pl.OwnerUsername, Length: int(pl.Length), Folder: pl.Folder}
 			if pl.ImageUrl != nil {
 				x.Image = *pl.ImageUrl
 			}
@@ -515,36 +491,22 @@ func (p *Player) Token(ctx context.Context) (string, error) {
 	return t.Token, nil
 }
 
-// Listing is a context's tracks as far as the player has resolved them:
-// Tracks has Length entries once Ready, and an entry not yet resolved has
-// only its URI. Ask again while !Complete.
-type Listing struct {
-	URI    string
-	Ready  bool
-	Length int
-	Cached int
-	Tracks []Track
-}
-
-// Complete reports that every track is listed with its metadata.
-func (l Listing) Complete() bool { return l.Ready && l.Cached >= l.Length }
-
 // ContextTracks lists the tracks of a playlist, album, or Liked Songs. The
 // player enumerates in the background, so a first answer is often partial.
-func (p *Player) ContextTracks(ctx context.Context, uri string) (Listing, error) {
+func (p *Player) ContextTracks(ctx context.Context, uri string) (model.Listing, error) {
 	v, err := p.request(ctx, daemon.ApiRequestTypeContextTracks, daemon.ApiRequestDataContextTracks{Uri: uri})
 	if err != nil {
-		return Listing{}, err
+		return model.Listing{}, err
 	}
 	r, ok := v.(*daemon.ApiContextTracks)
 	if !ok {
-		return Listing{}, fmt.Errorf("player: unexpected tracks %T", v)
+		return model.Listing{}, fmt.Errorf("player: unexpected tracks %T", v)
 	}
 	return listingOf(r), nil
 }
 
-func listingOf(r *daemon.ApiContextTracks) Listing {
-	l := Listing{URI: r.Uri, Ready: r.Ready, Length: r.Length, Cached: r.Cached, Tracks: make([]Track, len(r.Tracks))}
+func listingOf(r *daemon.ApiContextTracks) model.Listing {
+	l := model.Listing{URI: r.Uri, Ready: r.Ready, Length: r.Length, Cached: r.Cached, Tracks: make([]model.Track, len(r.Tracks))}
 	for i, it := range r.Tracks {
 		if it.Track != nil {
 			l.Tracks[i] = trackOf(*it.Track)
@@ -591,9 +553,6 @@ func (p *Player) Liked(ctx context.Context, uris []string) ([]bool, error) {
 	}
 	return out, nil
 }
-
-// LikedSongs is the context URI of the user's Liked Songs.
-func LikedSongs(username string) string { return "spotify:user:" + username + ":collection" }
 
 // Play plays the context uri (a playlist, album, or track), starting at the
 // track skipTo when set.

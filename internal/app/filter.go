@@ -6,7 +6,7 @@ import (
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui"
 	"github.com/lunguini/flatte/flatui/layout"
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 const (
@@ -59,12 +59,12 @@ func collapseEmptyTrackFilter(s *State) {
 	}
 }
 
-func filterTracks(s *State, l player.Listing) player.Listing {
+func filterTracks(s *State, l model.Listing) model.Listing {
 	query := strings.ToLower(strings.TrimSpace(s.trackFilter.Value))
 	if query == "" || virtual(l.URI) {
 		return l
 	}
-	tracks := make([]player.Track, 0, len(l.Tracks))
+	tracks := make([]model.Track, 0, len(l.Tracks))
 	for _, track := range l.Tracks {
 		if strings.Contains(strings.ToLower(track.Name), query) || strings.Contains(strings.ToLower(strings.Join(track.Artists, ", ")), query) || strings.Contains(strings.ToLower(track.Album), query) {
 			tracks = append(tracks, track)
