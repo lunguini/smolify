@@ -214,8 +214,8 @@ func confirmSignOut(s *State) {
 		Title:   "Sign out of Spotify?",
 		Message: "Smolify forgets this device's sign-in and asks you to pair it again.",
 		Buttons: []string{"Sign Out", "Cancel"},
-	}, func(s *State, button int) {
-		if button != 0 {
+	}, func(s *State, button int, err error) {
+		if err != nil || button != 0 {
 			return
 		}
 		resetAccount(s)
