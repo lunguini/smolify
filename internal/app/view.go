@@ -171,7 +171,7 @@ func railView(s *State, g bool) layout.Node {
 		return row
 	})
 	rows.ID, rows.W, rows.H = idRail, layout.Grow(1), layout.Grow(1)
-	withHover(&rows, s.page == pageLibrary) // the center shows Home or search, not a list
+	withHover(&rows, s.page == pageLibrary, g) // the center shows Home or search, not a list
 	count := ""
 	if n := len(lib); n > 0 {
 		count = strconv.Itoa(n)
@@ -235,11 +235,14 @@ func twoLines(nb layout.NodeBase, title string, titleStyle layout.TextStyle, sub
 
 // withHover gives a list's rows a hover fill and rounded corners, and
 // drops their selection unless selected.
-func withHover(rows *layout.Col, selected bool) {
+func withHover(rows *layout.Col, selected, g bool) {
 	for i, c := range rows.Children {
 		if r, ok := c.(layout.Row); ok {
 			r.Box.Hover, r.Box.Round, r.Box.InsetY = hoverBg, true, rowGap
 			r.Box.Selected = r.Box.Selected && selected
+			if r.Box.Selected && !g { // a terminal draws no selection of its own
+				r.Box.Background = termSelectBg
+			}
 			rows.Children[i] = r
 		}
 	}
@@ -541,7 +544,7 @@ func trackTable(s *State, l player.Listing, listed bool, g bool, width int) layo
 		return trackRow(s, numbers[i]-1, l.Tracks[i], g, dateColumn)
 	})
 	rows.ID, rows.W, rows.H = idTracks, layout.Grow(1), layout.Grow(1)
-	withHover(&rows, true)
+	withHover(&rows, true, g)
 	return layout.Col{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{
 		header,
 		rule,

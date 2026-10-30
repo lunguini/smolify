@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<defs><linearGradient id="band" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#23B8FF"/><stop offset=".55" stop-color="#683BFF"/><stop offset="1" stop-color="#FA338E"/></linearGradient><linearGradient id="face" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#4031CA"/><stop offset="1" stop-color="#9D26D9"/></linearGradient><linearGradient id="cup" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#25C3FF"/><stop offset="1" stop-color="#5A2BF2"/></linearGradient></defs>
+<!-- Bold headphones arch -->
+<path d="M47 132V111C47 65 83 31 128 31S209 65 209 111V132" fill="none" stroke="url(#band)" stroke-width="27" stroke-linecap="round"/>
+<!-- One simple face -->
+<rect x="61" y="86" width="134" height="139" rx="65" fill="url(#face)"/>
+<!-- Two eyes only -->
+<rect x="98" y="147" width="13" height="28" rx="6.5" fill="#F4D9FF"/>
+<rect x="145" y="147" width="13" height="28" rx="6.5" fill="#F4D9FF"/>
+<!-- Simple headphones -->
+<rect x="29" y="116" width="43" height="79" rx="21.5" fill="url(#cup)"/>
+<rect x="184" y="116" width="43" height="79" rx="21.5" fill="#ED3B9D"/>
+</svg>

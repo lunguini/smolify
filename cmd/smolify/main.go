@@ -83,7 +83,7 @@ func main() {
 		theme := app.WindowTheme()
 		err = window.Run(ctx, a, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
 	} else {
-		err = flatte.Run(ctx, a, flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit(), flatte.WithReportFocus())
+		err = window.RunTerminal(ctx, a, flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit(), flatte.WithReportFocus())
 	}
 	if err != nil {
 		fail(err)

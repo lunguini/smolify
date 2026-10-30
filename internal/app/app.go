@@ -103,15 +103,17 @@ type State struct {
 	pairing player.Pairing
 	ready   bool
 
-	track    *player.Track
-	pending  *playIntent
-	playing  bool
-	position time.Duration
-	volume   int
-	volMax   int
-	shuffle  bool
-	repeat   player.Repeat
-	context  string // the playing context's URI
+	track         *player.Track
+	mediaTrackURI string // latest URI confirmed by playback status/event, not Track metadata alone
+	mediaPlaying  bool   // backend-confirmed state; s.playing also includes optimistic UI changes
+	pending       *playIntent
+	playing       bool
+	position      time.Duration
+	volume        int
+	volMax        int
+	shuffle       bool
+	repeat        player.Repeat
+	context       string // the playing context's URI
 
 	username  string // the signed-in account ("": not known yet)
 	playlists []player.Playlist
@@ -376,7 +378,7 @@ func New(be Backend, img Images, web Web, debug io.Writer) flatte.App[State] {
 	initAudioSettings(s)
 	s.deviceName = flatui.TextField{Value: s.settings.DeviceName, Cursor: len(s.settings.DeviceName)}
 	return flatte.App[State]{
-		State: s, Init: Init, Handle: Handle, View: View, Menus: Menus, ContextMenu: ContextMenu,
+		State: s, Init: Init, Handle: Handle, View: View, Menus: Menus, ContextMenu: ContextMenu, NowPlaying: nowPlaying,
 	}
 }
 
@@ -491,10 +493,18 @@ func onPlayer(s *State, ev player.Event) {
 			refreshModes(s)
 		}
 		s.playing, s.context = true, nonEmpty(e.ContextURI, s.context)
+		s.mediaPlaying = true
+		if e.URI != "" {
+			s.mediaTrackURI = e.URI
+		}
 	case player.Paused:
-		s.playing = false
+		s.playing, s.mediaPlaying = false, false
+		if e.URI != "" {
+			s.mediaTrackURI = e.URI
+		}
 	case player.Stopped:
-		s.playing = false
+		s.playing, s.mediaPlaying = false, false
+		s.mediaTrackURI = ""
 	case player.Seek:
 		s.position = e.Position
 	case player.Volume:
@@ -594,9 +604,15 @@ func refreshStatus(s *State) {
 		}
 		s.ready = true
 		s.playing = !st.Paused && !st.Stopped && st.Track != nil
+		s.mediaPlaying = s.playing
 		s.volume, s.volMax = st.Volume, max(st.VolumeSteps, 1)
 		s.shuffle, s.repeat = st.Shuffle, st.Repeat
 		s.context = nonEmpty(st.ContextURI, s.context)
+		if st.Stopped {
+			s.mediaTrackURI = ""
+		} else if st.Track != nil && st.Track.URI != "" {
+			s.mediaTrackURI = st.Track.URI
+		}
 		if st.Track != nil {
 			s.track, s.position = st.Track, st.Track.Position
 			fetchCover(s, st.Track.Cover)
@@ -1275,6 +1291,8 @@ func Handle(s *State, ev flatte.Event, fx flatte.Effects[State]) {
 		}
 	case flatte.MouseEvent:
 		handleMouse(s, e, fx)
+	case flatte.MediaEvent:
+		handleMedia(s, e, fx)
 	}
 }
 

@@ -1087,3 +1087,13 @@ func TestPlaybackFailureNamesTheCause(t *testing.T) {
 		t.Fatalf("bare: %q", got)
 	}
 }
+
+func TestTerminalShowsTheSelectedRow(t *testing.T) {
+	d, _ := ready(t)
+	d.State().page = pageLibrary
+	d.State().rail.Select(1)
+	fr := d.Settle()
+	if !strings.Contains(fr.Content, "48;2;59;51;85") {
+		t.Fatalf("no selection background in the terminal frame")
+	}
+}

@@ -25,7 +25,8 @@ var (
 	playingBg     = color.NRGBA{0x9d, 0x7b, 0xff, 0x1f} // the playing row, violet-washed
 	hoverBg       = color.NRGBA{0xff, 0xff, 0xff, 0x12} // a row under the pointer
 	searchBg      = lipgloss.Color("#1f1f1f")           // the search box
-	searchFocusBg = lipgloss.Color("#2a2a2a")           // the search box while typing
+	searchFocusBg = lipgloss.Color("#2a2a2a")
+	termSelectBg  = lipgloss.Color("#3b3355")           // the selected row in a terminal           // the search box while typing
 	backdropDim   = color.NRGBA{0, 0, 0, 0xa0}          // over a header's blurred cover
 	artVeil       = color.NRGBA{0x5b, 0x3f, 0xd0, 0x30} // over Smolify's art; a dark violet tile in a terminal
 	danger        = lipgloss.Color("#f15e6c")
