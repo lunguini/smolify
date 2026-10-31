@@ -18,6 +18,7 @@ import (
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/window"
+	"github.com/lunguini/flatte/window/media"
 
 	"github.com/lunguini/smolify/internal/app"
 	"github.com/lunguini/smolify/internal/librarycache"
@@ -93,7 +94,7 @@ func main() {
 		theme := app.WindowTheme()
 		runOptions = append(runOptions, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
 	} else {
-		runOptions = append(runOptions, window.MediaControls{})
+		runOptions = append(runOptions, media.Controls{})
 	}
 	err = flatte.Run(ctx, a, runOptions...)
 	if err != nil {

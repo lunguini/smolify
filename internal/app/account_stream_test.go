@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lunguini/flatte"
+	"github.com/lunguini/flatte/host"
 	"github.com/lunguini/smolify/internal/player"
 )
 
@@ -55,7 +56,7 @@ func TestPlayerStreamFencesQueuedOldEventAndResumesAfterSignOut(t *testing.T) {
 	updates := make(chan flatte.StateUpdate[State], 8)
 	backend := &streamBackend{fake: &fake{}, events: make(chan player.Event, 8), signOutCalls: make(chan bool, 1)}
 	s := New(backend, nil, nil, nil).State
-	s.fx = flatte.NewHarnessEffects(ctx, updates, nil, nil, nil)
+	s.fx = host.NewHarnessEffects(ctx, updates, nil, nil, nil)
 	followPlayer(s)
 	backend.retired = s.playerEventsDone
 	backend.events <- player.Track{URI: "spotify:track:old", Name: "Old account"}
@@ -111,7 +112,7 @@ func TestSignOutWaitsForCanceledPlayerSourceToExit(t *testing.T) {
 	}
 	backend := &streamBackend{fake: &fake{}, events: make(chan player.Event, 8), signOutCalls: make(chan bool, 1)}
 	s := New(backend, nil, nil, nil).State
-	s.fx = flatte.NewHarnessEffects(ctx, updates, nil, dispatch, nil)
+	s.fx = host.NewHarnessEffects(ctx, updates, nil, dispatch, nil)
 	followPlayer(s)
 	backend.retired = s.playerEventsDone
 	resetAccount(s)

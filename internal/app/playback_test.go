@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"github.com/lunguini/flatte"
+	"github.com/lunguini/flatte/host"
 	"github.com/lunguini/smolify/internal/player"
 	"testing"
 	"time"
@@ -161,7 +162,7 @@ func TestQueuedOldPlayFailureCannotClearNewRequest(t *testing.T) {
 	updates := make(chan flatte.StateUpdate[State], 64)
 	be := &delayedPlayBackend{fake: &fake{}, requests: make(chan delayedPlayCall, 2)}
 	s := New(be, nil, nil, nil).State
-	s.fx = flatte.NewHarnessEffects(ctx, updates, nil, nil, nil)
+	s.fx = host.NewHarnessEffects(ctx, updates, nil, nil, nil)
 	defer clearPendingPlay(s)
 	getCall := func() delayedPlayCall {
 		select {

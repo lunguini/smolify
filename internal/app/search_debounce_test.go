@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lunguini/flatte"
+	"github.com/lunguini/flatte/host"
 	"github.com/lunguini/smolify/internal/spotify"
 )
 
@@ -36,7 +37,7 @@ func debounceState(t *testing.T) (*State, <-chan string) {
 		go func() { defer workers.Done(); work() }()
 	}
 	s := New(&fake{}, nil, searchRequests{queries}, nil).State
-	s.fx = flatte.NewHarnessEffects(ctx, updates, nil, dispatch, nil)
+	s.fx = host.NewHarnessEffects(ctx, updates, nil, dispatch, nil)
 	s.focus = paneSearch
 	t.Cleanup(func() { cancel(); workers.Wait() })
 	return s, queries
