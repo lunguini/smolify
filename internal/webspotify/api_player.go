@@ -75,26 +75,12 @@ func (c *API) StartPlayback(ctx context.Context, deviceID, uri, skipTo string, l
 	body := map[string]any{}
 	switch {
 	case isLikedURI(uri):
-		uris := append([]string(nil), likedTracks...)
-		if len(uris) == 0 && skipTo != "" {
-			uris = []string{skipTo}
-		}
-		if len(uris) == 0 {
-			page, err := c.LikedTracks(ctx, 0, pageSize)
-			if err != nil {
-				return err
-			}
-			for _, item := range page.Items {
-				if item.Track.URI != "" {
-					uris = append(uris, item.Track.URI)
-				}
-			}
+		uris, err := c.likedQueue(ctx, likedTracks, skipTo)
+		if err != nil {
+			return err
 		}
 		if len(uris) == 0 {
 			return errorsNew("Liked Songs has no playable tracks")
-		}
-		if len(uris) > 100 {
-			uris = uris[:100]
 		}
 		body["uris"] = uris
 		if skipTo != "" {
@@ -186,3 +172,52 @@ func deviceQuery(deviceID string) url.Values {
 // Helpers keep syscall-free API files small and are easy for TinyGo to lower.
 func errorsNew(message string) error      { return errors.New("spotify Web API: " + message) }
 func hasPrefix(value, prefix string) bool { return strings.HasPrefix(value, prefix) }
+
+// maxPlayURIs bounds the track list sent to start a saved-library queue.
+const maxPlayURIs = 100
+
+// likedQueue returns up to maxPlayURIs saved tracks around skipTo, so
+// Next and Previous have a queue to move through. Tracks the caller has not
+// loaded are fetched until skipTo is found.
+func (c *API) likedQueue(ctx context.Context, known []string, skipTo string) ([]string, error) {
+	uris := append([]string(nil), known...)
+	if !containsString(uris, skipTo) || len(uris) == 0 {
+		uris = uris[:0]
+		for offset := 0; ; offset += pageSize {
+			page, err := c.LikedTracks(ctx, offset, pageSize)
+			if err != nil {
+				return nil, err
+			}
+			for _, item := range page.Items {
+				if hasPrefix(item.Track.URI, "spotify:track:") {
+					uris = append(uris, item.Track.URI)
+				}
+			}
+			found := skipTo == "" || containsString(uris, skipTo)
+			if len(page.Items) == 0 || offset+len(page.Items) >= page.Total ||
+				(found && len(uris)-indexString(uris, skipTo) >= maxPlayURIs) {
+				break
+			}
+		}
+	}
+	// Start the window at skipTo, but pull it back near the end of the list
+	// so the earlier tracks stay reachable with Previous.
+	if i := indexString(uris, skipTo); i > 0 {
+		uris = uris[max(0, min(i, len(uris)-maxPlayURIs)):]
+	}
+	if len(uris) > maxPlayURIs {
+		uris = uris[:maxPlayURIs]
+	}
+	return uris, nil
+}
+
+func containsString(list []string, s string) bool { return indexString(list, s) >= 0 }
+
+func indexString(list []string, s string) int {
+	for i, v := range list {
+		if v == s {
+			return i
+		}
+	}
+	return -1
+}

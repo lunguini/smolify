@@ -116,6 +116,31 @@ func TestLikedSongsPlaybackUsesTrackURIs(t *testing.T) {
 	}
 }
 
+func TestLikedSongsPlaybackFetchesQueueWhenUnknown(t *testing.T) {
+	var got callBody
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/me/tracks" {
+			items := `{"track":{"uri":"spotify:track:a"}},{"track":{"uri":"spotify:track:b"}}`
+			if r.URL.Query().Get("offset") != "0" {
+				items = `{"track":{"uri":"spotify:track:c"}}`
+			}
+			_, _ = io.WriteString(w, `{"items":[`+items+`],"total":3}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	api := testAPI(server.URL)
+	if err := api.StartPlayback(context.Background(), "device", model.LikedSongs("user"), "spotify:track:c", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.URIs) != 3 || got.Offset["uri"] != "spotify:track:c" {
+		t.Fatalf("saved-library playback body = %+v", got)
+	}
+}
+
 type callBody struct {
 	URIs       []string          `json:"uris"`
 	ContextURI string            `json:"context_uri"`
