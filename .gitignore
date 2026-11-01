@@ -8,3 +8,4 @@
 /dist/
 /web/wasm_exec.js
 /WEB-NOTES.md
+/web/local.env
