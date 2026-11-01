@@ -45,6 +45,27 @@
         text-decoration: none;
       }
       header a:hover { background: #25202f; }
+      .view-switch {
+        display: inline-flex;
+        padding: 2px;
+        border: 1px solid #393541;
+        border-radius: 7px;
+        background: #111014;
+      }
+      .view-switch button {
+        border: 0;
+        border-radius: 5px;
+        padding: 6px 9px;
+        background: transparent;
+        color: #b8b1c6;
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .view-switch button[aria-pressed="true"] {
+        background: #2a2731;
+        color: #f5f1ff;
+      }
       #app {
         flex: 1;
         min-width: 0;
@@ -66,6 +87,7 @@
         .title { font-size: 13px; }
         #mode-status { font-size: 10px; }
         header a { padding: 6px 7px; font-size: 10px; }
+        .view-switch button { padding: 4px; font-size: 9px; }
         #app { padding: 6px; }
       }
     </style>
@@ -73,6 +95,10 @@
   <body>
     <header>
       <span class="title">Smolify</span>
+      <div class="view-switch" role="group" aria-label="App view">
+        <button type="button" data-view="terminal">Terminal</button>
+        <button type="button" data-view="gui">GUI</button>
+      </div>
       <span id="mode-status" role="status" aria-live="polite">Starting…</span>
       <a href="?spotify">Connect account</a>
       <a href="?demo">Demo</a>
@@ -82,6 +108,17 @@
     <script src="./wasm_exec.js"></script>
     <script>
       window.SmolifyConfig = window.SmolifyConfig || {};
+      const viewKey = "smolify.web.view";
+      let view = "gui";
+      try { view = localStorage.getItem(viewKey) || "gui"; } catch (_) {}
+      if (view !== "terminal") view = "gui";
+      document.querySelectorAll("[data-view]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.view === view));
+        button.addEventListener("click", () => {
+          try { localStorage.setItem(viewKey, button.dataset.view); } catch (_) {}
+          window.location.reload();
+        });
+      });
       (async () => {
         const status = document.getElementById("mode-status");
         const go = new Go();

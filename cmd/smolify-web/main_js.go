@@ -11,6 +11,7 @@ import (
 	"syscall/js"
 
 	"github.com/lunguini/flatte"
+	"github.com/lunguini/flatte/window"
 	"github.com/lunguini/smolify/internal/app"
 	"github.com/lunguini/smolify/internal/demo"
 	"github.com/lunguini/smolify/internal/librarycache"
@@ -103,7 +104,7 @@ func main() {
 	a := app.New(backend, webimages.Images{}, backend, nil)
 	a = app.WithSettingsStore(a, browserSettingsStore{}, settings)
 	a = app.WithCacheStore(a, librarycache.New(""))
-	if err := flatte.Run(ctx, a, runOptions...); err != nil {
+	if err := runBrowserApp(ctx, a); err != nil {
 		setStatus("Smolify could not start: " + err.Error())
 	}
 }
@@ -114,9 +115,30 @@ func startDemo(ctx context.Context, settings app.Settings) {
 	setStatus("Demo mode · sample data and simulated playback")
 	a := app.New(backend, backend, backend, nil)
 	a = app.WithSettingsStore(a, browserSettingsStore{}, settings)
-	if err := flatte.Run(ctx, a, runOptions...); err != nil {
+	if err := runBrowserApp(ctx, a); err != nil {
 		setStatus("Smolify could not start: " + err.Error())
 	}
+}
+
+const browserViewKey = "smolify.web.view"
+
+func runBrowserApp(ctx context.Context, a flatte.App[app.State]) error {
+	options := []flatte.Option{
+		flatte.WithMouse(flatte.MouseModeCellMotion),
+		flatte.WithoutDefaultQuit(),
+		flatte.WithReportFocus(),
+	}
+	if browserGUIEnabled() {
+		a = app.Windowed(a)
+		theme := app.WindowTheme()
+		options = append(options, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts()})
+	}
+	return flatte.Run(ctx, a, options...)
+}
+
+func browserGUIEnabled() bool {
+	value, err := browserStorageGet("localStorage", browserViewKey)
+	return err != nil || value != "terminal"
 }
 
 func beginSignIn(session browserSessionStore, auth *webspotify.Auth) {
@@ -171,7 +193,3 @@ func setStatus(message string) {
 		status.Set("textContent", message)
 	}
 }
-
-// runOptions match the terminal build: mouse input with motion (hover),
-// shortcuts left to the app, and focus reports for notifications.
-var runOptions = []flatte.Option{flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit(), flatte.WithReportFocus()}
