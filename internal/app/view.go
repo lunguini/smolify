@@ -820,7 +820,7 @@ func playerBar(s *State, g bool) layout.Node {
 		layout.Button{NodeBase: sq(idPrev, "Previous (p)", 32), Icon: layout.IconPrevious, Label: "⏮", Plain: true, Style: subtle},
 		play,
 		layout.Button{NodeBase: sq(idNext, "Next (n)", 32), Icon: layout.IconNext, Label: "⏭", Plain: true, Style: subtle},
-		layout.Button{NodeBase: sq(idRepeat, repeatTip(s.repeat), 32), Icon: layout.IconRepeat, Label: repeatLabel(s.repeat), Plain: true, Style: mode(s.repeat.Context || s.repeat.Track)},
+		layout.Button{NodeBase: sq(idRepeat, repeatTip(s.repeat), 32), Icon: repeatIcon(s.repeat), Label: repeatLabel(s.repeat), Plain: true, Style: mode(s.repeat.Context || s.repeat.Track)},
 		layout.NewSpacer(),
 	}}
 
@@ -938,6 +938,13 @@ func loadingView(s *State, g bool) layout.Node {
 }
 
 // repeatLabel is the repeat button's terminal text: ↻1 while one song repeats.
+func repeatIcon(r model.Repeat) layout.IconName {
+	if r.Track {
+		return layout.IconRepeatOne
+	}
+	return layout.IconRepeat
+}
+
 func repeatLabel(r model.Repeat) string {
 	if r.Track {
 		return "↻1"
