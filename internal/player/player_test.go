@@ -1,8 +1,10 @@
 package player
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -117,5 +119,20 @@ func TestListingOf(t *testing.T) {
 	}
 	if LikedSongs("adrian") != "spotify:user:adrian:collection" {
 		t.Fatal(LikedSongs("adrian"))
+	}
+}
+
+func TestReorderAccesspoints(t *testing.T) {
+	in := `{"accesspoint":["a:4070","a:443","a:80","b:4070","b:443","c:80"],"dealer":["d:443"]}`
+	var got struct{ Accesspoint, Dealer []string }
+	if err := json.Unmarshal(reorderAccesspoints([]byte(in)), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"a:80", "c:80", "a:443", "b:443", "a:4070", "b:4070"}
+	if !slices.Equal(got.Accesspoint, want) || !slices.Equal(got.Dealer, []string{"d:443"}) {
+		t.Fatalf("got %v", got)
+	}
+	if string(reorderAccesspoints([]byte("nope"))) != "nope" {
+		t.Fatal("unparsable body changed")
 	}
 }

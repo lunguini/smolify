@@ -3,6 +3,8 @@ package player
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -52,19 +54,32 @@ func SignOut(dir string) error {
 	return f.Save(st)
 }
 
-// quietLogger discards the player's log; failures reach the UI as events
-// and request errors instead.
-type quietLogger struct{}
+// logger writes the player's info, warnings and errors to w, or discards
+// them when w is nil: in the app, failures reach the UI as events and
+// request errors instead.
+type logger struct {
+	w      io.Writer
+	fields string
+}
 
-func (quietLogger) Tracef(string, ...any)                    {}
-func (quietLogger) Debugf(string, ...any)                    {}
-func (quietLogger) Infof(string, ...any)                     {}
-func (quietLogger) Warnf(string, ...any)                     {}
-func (quietLogger) Errorf(string, ...any)                    {}
-func (quietLogger) Trace(...any)                             {}
-func (quietLogger) Debug(...any)                             {}
-func (quietLogger) Info(...any)                              {}
-func (quietLogger) Warn(...any)                              {}
-func (quietLogger) Error(...any)                             {}
-func (q quietLogger) WithField(string, any) librespot.Logger { return q }
-func (q quietLogger) WithError(error) librespot.Logger       { return q }
+func (l logger) out(level, msg string) {
+	if l.w != nil {
+		fmt.Fprintf(l.w, "%s %s%s\n", level, msg, l.fields)
+	}
+}
+
+func (l logger) Tracef(string, ...any)     {}
+func (l logger) Debugf(string, ...any)     {}
+func (l logger) Infof(f string, a ...any)  { l.out("info ", fmt.Sprintf(f, a...)) }
+func (l logger) Warnf(f string, a ...any)  { l.out("warn ", fmt.Sprintf(f, a...)) }
+func (l logger) Errorf(f string, a ...any) { l.out("error", fmt.Sprintf(f, a...)) }
+func (l logger) Trace(...any)              {}
+func (l logger) Debug(...any)              {}
+func (l logger) Info(a ...any)             { l.out("info ", fmt.Sprint(a...)) }
+func (l logger) Warn(a ...any)             { l.out("warn ", fmt.Sprint(a...)) }
+func (l logger) Error(a ...any)            { l.out("error", fmt.Sprint(a...)) }
+func (l logger) WithField(k string, v any) librespot.Logger {
+	l.fields += fmt.Sprintf(" %s=%v", k, v)
+	return l
+}
+func (l logger) WithError(err error) librespot.Logger { return l.WithField("error", err) }
