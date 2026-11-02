@@ -33,6 +33,8 @@ func main() {
 	q := flag.String("q", "harder better", "the search to try")
 	flag.Parse()
 
+	fmt.Printf("starting\n")
+
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		fail(err)
