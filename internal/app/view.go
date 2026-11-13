@@ -417,7 +417,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 		actions.Children = append(actions.Children, layout.NewSpacer(), filterView(s, g), sortView(s))
 	}
 	info = append(info, actions)
-	size := pick(g, headerCover, 64)
+	size := pick(g, headerCover, 128) // 16×8 cells: room for half-block art
 	art, wash := cover(s, pl.Image, size), s.covers[pl.Image]
 	if pl.Image == "" {
 		wash = smolArt()
@@ -785,7 +785,7 @@ func playerBar(s *State, g bool) layout.Node {
 		title, artists, coverURL = t.Name, strings.Join(t.Artists, ", "), t.Cover
 	}
 	now := layout.Row{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth), Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
-		cover(s, coverURL, 48),
+		cover(s, coverURL, pick(g, 48, 64)),
 		layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{
 			layout.Label{Text: title, Truncate: true, Style: strong},
 			layout.Label{Text: artists, Truncate: true, Style: secondary},
