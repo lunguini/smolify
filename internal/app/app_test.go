@@ -812,7 +812,7 @@ func TestHomeIsRecentlyPlayed(t *testing.T) {
 	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: 'h'})
 	fr := plain(d.Settle())
 	s := d.State()
-	if s.page != pageHome || strings.Count(fr, "Overture") != 1 || !strings.Contains(fr, "Recently played") || !strings.Contains(fr, "♥") {
+	if s.page != pageHome || strings.Count(fr, "Overture") != 1 || !strings.Contains(fr, "Recently played") || !strings.Contains(fr, "Liked Songs") {
 		t.Fatalf("home:\n%s", fr)
 	}
 	// The rail shows no selected list while Home is up.

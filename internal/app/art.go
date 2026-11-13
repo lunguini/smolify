@@ -57,3 +57,32 @@ var blankArt = func() image.Image {
 
 // artPixels is smolArt's size: as large as a fetched header cover.
 const artPixels = coverPixels
+
+// likedArt is Liked Songs' cover as one picture, for terminals: a white
+// heart on smolArt, about half its size, edges antialiased.
+var likedArt = sync.OnceValue(func() image.Image {
+	const n, samples = artPixels, 4
+	base := smolArt()
+	out := image.NewRGBA(image.Rect(0, 0, n, n))
+	for y := range n {
+		for x := range n {
+			inside := 0
+			for sy := range samples {
+				for sx := range samples {
+					// The heart curve (x²+y²-1)³ - x²y³ ≤ 0, scaled to about
+					// middle half and lifted to sit centered.
+					u := ((float64(x)+(float64(sx)+0.5)/samples)/n - 0.5) * 4.2
+					v := (0.47 - (float64(y)+(float64(sy)+0.5)/samples)/n) * 4.2
+					if a := u*u + v*v - 1; a*a*a-u*u*v*v*v <= 0 {
+						inside++
+					}
+				}
+			}
+			r, g, b, _ := base.At(x, y).RGBA()
+			f := float64(inside) / samples / samples
+			mix := func(c uint32) uint8 { return uint8(float64(c>>8) + (0xff-float64(c>>8))*f) }
+			out.SetRGBA(x, y, color.RGBA{mix(r), mix(g), mix(b), 0xff})
+		}
+	}
+	return out
+})

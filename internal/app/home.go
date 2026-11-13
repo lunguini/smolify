@@ -193,7 +193,7 @@ func homeView(s *State, g bool, width int) layout.Node {
 				if nb.Box.Selected {
 					nb.Box.Background = playingBg
 				}
-				cards = append(cards, card(nb, homeArtwork(s, item.Image, coverSize),
+				cards = append(cards, card(nb, homeArtwork(s, item.Image, coverSize, g),
 					layout.Label{Text: item.Name, Truncate: true, Style: strong}, layout.Label{Text: detail, Truncate: true, Style: secondary}))
 				index++
 			}
@@ -355,8 +355,8 @@ func homeKey(s *State, k flatte.KeyEvent) bool {
 
 // Artwork follows its allocated card width even during the initial layout
 // before measured pane geometry arrives.
-func homeArtwork(s *State, url string, size int) layout.Node {
-	node := cover(s, url, size)
+func homeArtwork(s *State, url string, size int, g bool) layout.Node {
+	node := cover(s, url, size, g)
 	switch v := node.(type) {
 	case layout.Image:
 		v.W = layout.Grow(1)
