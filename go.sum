@@ -29,8 +29,8 @@ github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6p
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/devgianlu/go-librespot v0.10.5 h1:cZq0hU02XN2cdzAQcbdMySWuzs6w2f7GfPflMTS0jv4=
-github.com/devgianlu/go-librespot v0.10.5/go.mod h1:gJ46H3EZCiObC5WlD1jF2trXhsT+F4AsRxPp2HAnv7g=
+github.com/devgianlu/go-librespot v0.10.6-0.20261104083510-b1b8b3ceb06e h1:9A/G8evkuJUiOrFgrraJ5k1Bz5G2KyIjSv/Siv+AXS4=
+github.com/devgianlu/go-librespot v0.10.6-0.20261104083510-b1b8b3ceb06e/go.mod h1:gJ46H3EZCiObC5WlD1jF2trXhsT+F4AsRxPp2HAnv7g=
 github.com/devgianlu/shannon v0.0.0-20230613115856-82ec90b7fa7e h1:OoETp+L//8ZDtd5BWKaogHQjgA104yF4a2yqjfaG3mE=
 github.com/devgianlu/shannon v0.0.0-20230613115856-82ec90b7fa7e/go.mod h1:m5DMFz6BcaKJwxxPaSh9MxwPzK2GPSt1KRFC8Imf0ik=
 github.com/ebitengine/purego v0.11.2 h1:WWiTx8rD8zYdOwSj8O/NiNbsOvSAgJMTlyV1XlbUSeU=

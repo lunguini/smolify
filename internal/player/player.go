@@ -171,6 +171,9 @@ func (p *Player) launch() error {
 			ImageSize:             "default",
 			Metadata:              daemon.MetadataConfig{Enabled: true, MaxTracks: 2000},
 			Credentials:           daemon.CredentialsConfig{Type: "device_auth"},
+			// Port 80 first: some networks drop the accesspoint handshake on
+			// 443 (it is not TLS), and every failed 443 attempt costs a timeout.
+			AccesspointPorts: []int{80, 443},
 		},
 	})
 	if err != nil {
@@ -455,7 +458,7 @@ func statusOf(v any) (model.Status, error) {
 func (p *Player) Playlists(ctx context.Context) ([]model.Playlist, error) {
 	var out []model.Playlist
 	for offset := 0; ; {
-		v, err := p.request(ctx, daemon.ApiRequestTypeLibraryPlaylists, daemon.ApiRequestDataLibraryPlaylists{Offset: offset, Limit: 100})
+		v, err := p.request(ctx, daemon.ApiRequestTypeLibraryPlaylists, daemon.ApiRequestDataLibraryPage{Offset: offset, Limit: 100})
 		if err != nil {
 			return nil, err
 		}

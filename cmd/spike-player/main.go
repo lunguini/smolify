@@ -79,7 +79,7 @@ func main() {
 	// Requests fail until the session is up (after pairing): retry.
 	var playlists daemon.ApiLibraryPlaylists
 	for {
-		data, err := request(ctx, server, daemon.ApiRequestTypeLibraryPlaylists, daemon.ApiRequestDataLibraryPlaylists{Limit: 10})
+		data, err := request(ctx, server, daemon.ApiRequestTypeLibraryPlaylists, daemon.ApiRequestDataLibraryPage{Limit: 10})
 		if err == nil {
 			playlists = *data.(*daemon.ApiLibraryPlaylists)
 			break
