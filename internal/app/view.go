@@ -95,6 +95,10 @@ func View(s *State, ctx flatte.RenderContext) flatte.Frame {
 			}},
 			playerBar(s, g),
 		}}
+		if !g && s.focus == paneSearch {
+			// A blinking bar draws the eye to the search field.
+			frame.CursorStyle = &flatte.CursorStyle{Shape: flatte.CursorShapeBar, Blink: true}
+		}
 	}
 	return frame
 }
@@ -176,8 +180,12 @@ func railView(s *State, g bool) layout.Node {
 	if n := len(lib); n > 0 {
 		count = strconv.Itoa(n)
 	}
+	var mark layout.Node = layout.Col{}
+	if g { // a terminal names the app in the top bar instead
+		mark = brandMark(g)
+	}
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth), Gap: 1}, Children: []layout.Node{
-		brandMark(g),
+		mark,
 		card(layout.NodeBase{PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1, Box: layout.Box{Background: railBg}},
 			navItem(s, g, idHome, layout.IconHome, "⌂ ", "Home", pageHome),
 			navItem(s, g, idSearch, layout.IconSearch, "⌕ ", "Search", pageSearch),
@@ -297,7 +305,11 @@ func brandMark(g bool) layout.Node {
 // and forward, and the search field in the middle.
 func topBar(s *State, g bool) layout.Node {
 	nav := func(id string, icon layout.IconName, label, tip string, can bool) layout.Node {
-		return layout.Button{NodeBase: layout.NodeBase{ID: id, Tooltip: tip, W: layout.Points(32), H: layout.Points(32)}, Icon: icon, Label: label, Plain: true, Disabled: !can}
+		b := layout.Button{NodeBase: layout.NodeBase{ID: id, Tooltip: tip, W: layout.Points(32), H: layout.Points(32)}, Icon: icon, Label: label, Plain: true, Disabled: !can}
+		if !g {
+			b.H = layout.Fixed(1) // centered on the framed search field's line
+		}
+		return b
 	}
 	focused := s.focus == paneSearch
 	field := s.query.Layout(idQuery, focused)
@@ -308,6 +320,21 @@ func topBar(s *State, g bool) layout.Node {
 	// field has the keyboard. A terminal draws the two side by side.
 	var search layout.Node = layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{icon, field}}
 	bar := layout.NodeBase{Gap: 1}
+	// The rail's slot: empty under a window's buttons, the app's name in a
+	// terminal, which has none.
+	var lead layout.Node = layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth)}}
+	if !g {
+		lead = layout.Row{NodeBase: layout.NodeBase{ID: "brand", W: layout.Fixed(railWidth), PadLeft: 1}, Align: layout.AlignCenter, Children: []layout.Node{
+			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Fg: brand}},
+		}}
+		// A framed field, lit while it has the keyboard.
+		icon.W, icon.H = layout.Auto(), layout.Fixed(1)
+		box := layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+		if focused {
+			box.BorderColor, icon.Style = brand, layout.TextStyle{Fg: brand}
+		}
+		search = layout.Row{NodeBase: layout.NodeBase{ID: idSearchBox, W: layout.Grow(1), Gap: 1, PadLeft: 1, PadRight: 1, Box: box}, Align: layout.AlignCenter, Children: []layout.Node{icon, field}}
+	}
 	if g {
 		bar.H = layout.Points(48)
 		field.Bare = true
@@ -318,6 +345,9 @@ func topBar(s *State, g bool) layout.Node {
 		search = layout.Row{NodeBase: layout.NodeBase{ID: idSearchBox, W: layout.Fixed(52), H: layout.Points(34), Gap: 1, PadLeft: 1, PadRight: 1, Box: box}, Align: layout.AlignCenter, Children: []layout.Node{icon, field}}
 	}
 	gear := layout.Button{NodeBase: layout.NodeBase{ID: idSettings, Tooltip: "Settings (⌘,)", W: layout.Points(32), H: layout.Points(32)}, Icon: layout.IconGear, Label: "⚙", Plain: true}
+	if !g {
+		gear.H = layout.Fixed(1)
+	}
 	if s.page == pageSettings {
 		gear.Style = layout.TextStyle{Fg: brand}
 	}
@@ -328,7 +358,7 @@ func topBar(s *State, g bool) layout.Node {
 	}
 
 	return layout.Row{NodeBase: bar, Align: layout.AlignCenter, Children: []layout.Node{
-		layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth)}},
+		lead,
 		nav(idBack, layout.IconChevronLeft, "‹", "Back (⌘[)", len(s.back) > 0),
 		nav(idForward, layout.IconChevronRight, "›", "Forward (⌘])", len(s.forward) > 0),
 		searchArea,

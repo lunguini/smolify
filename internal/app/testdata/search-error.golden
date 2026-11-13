@@ -1,14 +1,14 @@
-                                   ‹    ›   ⌕   over                                            ⚙
-
-   Smolify                                                                                         
+                                            ╭───────────────────────────────────────────╮
+  Smolify                          ‹    ›   │ ⌕  over                                   │       ⚙
+                                            ╰───────────────────────────────────────────╯
                                                                                                    
-                                    Search                                                         
-   ⌂  Home                          Songs                                                          
-   ⌕  Search                                                                                       
+                                                                                                   
+   ⌂  Home                          Search                                                         
+   ⌕  Search                        Songs                                                          
+                                                                                                   
                                     Could not search: offline                                      
                                                                                                    
-                                    Search failed. Press Enter to retry.                           
-  Your Library                 2                                                                   
+  Your Library                 2    Search failed. Press Enter to retry.                           
                                                                                                    
         bass house                                                                                 
         Playlist · adrian                                                                          
@@ -27,5 +27,5 @@
  ▀▀▀▀▀▀▀▀ Nothing playing                    ⇄    ⏮   [▶]   ⏭    ↻ 
  ▀▀▀▀▀▀▀▀ Pick a playlist and pr…
  ▀▀▀▀▀▀▀▀
-[cursor 52,0]
+[cursor 53,1]
 [title Smolify]
