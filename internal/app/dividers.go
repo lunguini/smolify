@@ -61,31 +61,43 @@ func (v vrule) Render(r layout.Rect) string {
 	return lipgloss.NewStyle().Foreground(searchBorder).Render(strings.Join(lines, "\n"))
 }
 
-// pillCap is a line of room between two list rows that rounds the
-// selected one beside it: half a line of its highlight, cornered with
-// quadrants (▗▄▄▖ above it, ▝▀▀▘ below), so the selection reads as a
-// rounded pill in the highlight's own color. Blank beside no selection.
-type pillCap struct {
+// The selected entry of a list in a terminal is outlined, rounded as the
+// search field is, in the accent: its top and bottom edges in the lines of
+// room above and below it, its sides in its outer columns.
+
+// outlineEdge is a line of room between two list rows: the selected
+// entry's top edge (╭──╮) when it is below, its bottom edge (╰──╯) when
+// above, blank beside no selection.
+type outlineEdge struct {
 	layout.NodeBase
-	below    bool
+	below    bool // the edge under the selected entry
 	selected bool
 }
 
-func (p pillCap) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
+func (e outlineEdge) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
 
-func (p pillCap) Render(r layout.Rect) string {
-	if !p.selected || r.W < 2 {
+func (e outlineEdge) Render(r layout.Rect) string {
+	if !e.selected || r.W < 2 {
 		return strings.Repeat(" ", max(r.W, 0))
 	}
-	left, fill, right := "▗", "▄", "▖"
-	if p.below {
-		left, fill, right = "▝", "▀", "▘"
+	left, right := "╭", "╮"
+	if e.below {
+		left, right = "╰", "╯"
 	}
-	return lipgloss.NewStyle().Foreground(termSelectBg).Render(left + strings.Repeat(fill, r.W-2) + right)
+	return lipgloss.NewStyle().Foreground(brand).Render(left + strings.Repeat("─", r.W-2) + right)
 }
 
-// roomyRows puts a line of room between rows' entries in a terminal, the
-// selected entry's rounded above and below (see pillCap).
+// outlineSide is a side of the selected entry's outline, down its height.
+type outlineSide struct{ layout.NodeBase }
+
+func (outlineSide) Size() (layout.Size, layout.Size) { return layout.Fixed(1), layout.Grow(1) }
+
+func (outlineSide) Render(r layout.Rect) string {
+	return lipgloss.NewStyle().Foreground(brand).Render(strings.TrimSuffix(strings.Repeat("│\n", max(r.H, 0)), "\n"))
+}
+
+// roomyRows puts a line of room between rows' entries in a terminal, and
+// outlines the selected entry (see outlineEdge).
 func roomyRows(rows *layout.Col) {
 	if len(rows.Children) == 0 {
 		return
@@ -94,25 +106,33 @@ func roomyRows(rows *layout.Col) {
 		r, ok := n.(layout.Row)
 		return ok && r.Box.Selected && r.Box.Background == termSelectBg
 	}
+	marked := make([]bool, len(rows.Children))
+	for i, c := range rows.Children {
+		if !selected(c) {
+			continue
+		}
+		marked[i] = true
+		// The outline marks it instead of a fill; its sides take a column of
+		// the entry's padding each, so its content stays put.
+		r := c.(layout.Row)
+		r.Box.Background = nil
+		inner := make([]layout.Node, 0, len(r.Children)+2)
+		inner = append(inner, outlineSide{})
+		for _, child := range r.Children {
+			if row, ok := child.(layout.Row); ok {
+				row.Box.Background = nil
+				row.PadLeft, row.PadRight = max(row.PadLeft-1, 0), max(row.PadRight-1, 0)
+				child = row
+			}
+			inner = append(inner, child)
+		}
+		r.Children = append(inner, outlineSide{})
+		rows.Children[i] = r
+	}
 	out := make([]layout.Node, 0, 2*len(rows.Children))
 	for i, c := range rows.Children {
-		if selected(c) {
-			// The selection's color shows through the entry (a playing
-			// song keeps its violet title), matching the caps around it.
-			r := c.(layout.Row)
-			r.Children = append([]layout.Node(nil), r.Children...)
-			for j, child := range r.Children {
-				if inner, ok := child.(layout.Row); ok {
-					inner.Box.Background = nil
-					r.Children[j] = inner
-				}
-			}
-			c = r
-			rows.Children[i] = r
-		}
 		if i > 0 {
-			above, below := selected(rows.Children[i-1]), selected(c)
-			out = append(out, pillCap{selected: above || below, below: above})
+			out = append(out, outlineEdge{selected: marked[i-1] || marked[i], below: marked[i-1]})
 		}
 		out = append(out, c)
 	}

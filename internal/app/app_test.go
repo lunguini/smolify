@@ -1142,8 +1142,9 @@ func TestTerminalShowsTheSelectedRow(t *testing.T) {
 	d.State().page = pageLibrary
 	d.State().rail.Select(1)
 	fr := d.Settle()
-	if !strings.Contains(fr.Content, "48;2;59;51;85") {
-		t.Fatalf("no selection background in the terminal frame")
+	// Outlined in the accent: its top edge in the line above it.
+	if !strings.Contains(fr.Content, "38;2;157;123;255m╭") {
+		t.Fatalf("no selection outline in the terminal frame")
 	}
 }
 

@@ -83,3 +83,16 @@ func TestArrivingPagesKeepAListScrolledAwayFromItsSelection(t *testing.T) {
 		t.Fatalf("offset %d with the selection in view", s.tracks.Offset())
 	}
 }
+
+func TestWideTerminalHeaderHoldsTheSongTools(t *testing.T) {
+	s := sampleApp().State
+	_, wide := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 160}), 160, 40)
+	play, sort := wide.Rects[idPlayList], wide.Rects[idSort]
+	if play.Y != sort.Y {
+		t.Fatalf("wide: play at line %d, sort at %d; want one row", play.Y, sort.Y)
+	}
+	_, narrow := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 100}), 100, 40)
+	if narrow.Rects[idSort].Y <= narrow.Rects[idPlayList].Y {
+		t.Fatal("narrow: the song tools crowd the actions row")
+	}
+}

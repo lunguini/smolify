@@ -73,6 +73,10 @@ func card(nb layout.NodeBase, children ...layout.Node) layout.Col {
 	return layout.Col{NodeBase: nb, Children: children}
 }
 
+// headerToolsColumns is the terminal width from which Find and sort sit
+// on the playlist header's actions row; narrower, a row of their own.
+const headerToolsColumns = 120
+
 // navLines is the terminal rail's Home and Search section's height: a
 // line of room, the two items, and a line of room.
 const navLines = 4
@@ -526,6 +530,13 @@ func centerView(s *State, g bool, width int) layout.Node {
 			actions.Children[i] = b
 		}
 	}
+	// A wide terminal keeps the song tools on the actions' row, so no
+	// empty band sits between the cover and the songs.
+	toolsBeside := !g && width >= headerToolsColumns
+	if toolsBeside {
+		actions.Children = append(actions.Children, layout.NewSpacer(), filterView(s, g), framedSort(s))
+		actions.W = layout.Grow(1)
+	}
 	info = append(info, actions)
 	size := pick(g, headerCover, 128) // 16×8 cells: room for half-block art
 	art, wash := cover(s, pl.Image, size, g), s.covers[pl.Image]
@@ -567,7 +578,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 		note = layout.Label{Text: s.notice, Style: subtle}
 	}
 	children := []layout.Node{header}
-	if !g {
+	if !g && !toolsBeside {
 		children = append(children, layout.Row{NodeBase: layout.NodeBase{ID: "song-tools", PadLeft: 1, PadRight: 1, Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{layout.NewSpacer(), filterView(s, g), framedSort(s)}})
 	}
 	children = append(children, layout.Col{NodeBase: layout.NodeBase{PadLeft: 1, PadRight: 1, H: layout.Grow(1)}, Children: []layout.Node{note, trackTable(s, l, listed, g, width)}})
