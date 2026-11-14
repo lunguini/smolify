@@ -123,3 +123,31 @@ func TestTerminalPlayerPiecesShareTheirLines(t *testing.T) {
 		}
 	}
 }
+
+func TestEqualizerMovesWhilePlayingAndRests(t *testing.T) {
+	seen := map[string]bool{}
+	for f := range 12 {
+		bars := equalizerBars(f, true)
+		if n := len([]rune(bars)); n != 3 {
+			t.Fatalf("frame %d is %d bars", f, n)
+		}
+		seen[bars] = true
+	}
+	if len(seen) < 6 {
+		t.Fatalf("only %d distinct frames in 12", len(seen))
+	}
+	if equalizerBars(0, false) != equalizerBars(7, false) {
+		t.Fatal("a paused equalizer moves")
+	}
+}
+
+func TestPlayingRowIsDimlyOutlinedNotWashed(t *testing.T) {
+	s := sampleApp().State
+	fr, _ := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 160}), 160, 40)
+	if !strings.Contains(fr.Content, "38;2;79;68;117m╭") {
+		t.Fatal("no dim outline on the playing row")
+	}
+	if !strings.Contains(plain(fr), equalizerBars(0, s.playing)) {
+		t.Fatalf("no equalizer for the playing song:\n%s", plain(fr))
+	}
+}

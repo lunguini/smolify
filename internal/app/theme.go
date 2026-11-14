@@ -23,6 +23,7 @@ var (
 	railBg        = color.NRGBA{0x18, 0x18, 0x18, 0xe6} // the library, a shade apart
 	tileBg        = lipgloss.Color("#282828")           // a cover not loaded yet
 	playingBg     = color.NRGBA{0x9d, 0x7b, 0xff, 0x1f} // the playing row, violet-washed
+	playingEdge   = lipgloss.Color("#4f4475")           // the playing row's outline in a terminal
 	hoverBg       = color.NRGBA{0xff, 0xff, 0xff, 0x12} // a row under the pointer
 	searchBg      = lipgloss.Color("#1f1f1f")           // the search box
 	searchFocusBg = lipgloss.Color("#2a2a2a")           // the search box while typing

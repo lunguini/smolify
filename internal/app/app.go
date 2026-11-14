@@ -172,6 +172,8 @@ type State struct {
 	// layout.
 	drag      string
 	dragValue float64
+	// eqFrame steps the terminal's playing-row equalizer (see equalizerBars).
+	eqFrame int
 	// dragGrab is the line of a scroll bar's thumb the pointer holds, so
 	// the thumb follows the pointer from where it was grabbed.
 	dragGrab int
@@ -389,6 +391,13 @@ func Init(s *State, fx flatte.Effects[State]) {
 	s.fx = fx
 	followPlayer(s)
 	_ = flatte.Every(fx, "tick", time.Second, tick)
+	if !s.windowed {
+		_ = flatte.Every(fx, "equalizer", equalizerStep, func(s *State, _ time.Time) {
+			if s.playing {
+				s.eqFrame++
+			}
+		})
+	}
 }
 
 // followPlayer starts a separately scoped stream so sign-out can fence

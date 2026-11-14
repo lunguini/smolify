@@ -739,6 +739,9 @@ func trackRow(s *State, i int, t model.Track, g, dateColumn bool) layout.Node {
 	playing := !loadingPlay(s) && s.track != nil && s.track.URI == t.URI && (s.context == s.shown || virtual(s.shown))
 	if playing {
 		num = layout.Icon{Name: layout.IconEqualizer, Text: "♪ ", Style: layout.TextStyle{Fg: brand}, Animate: s.playing}
+		if !g { // three bars, flush right with the numbers, moving while it plays
+			num = layout.Label{Text: equalizerBars(s.eqFrame, s.playing), Style: layout.TextStyle{Fg: brand}}
+		}
 		name.Fg = brand
 	}
 	if requested {

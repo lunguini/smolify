@@ -1,7 +1,9 @@
 package app
 
 import (
+	"image/color"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/lunguini/flatte/flatui/layout"
@@ -65,35 +67,57 @@ func (v vrule) Render(r layout.Rect) string {
 // search field is, in the accent: its top and bottom edges in the lines of
 // room above and below it, its sides in its outer columns.
 
-// outlineEdge is a line of room between two list rows: the selected
-// entry's top edge (╭──╮) when it is below, its bottom edge (╰──╯) when
-// above, blank beside no selection.
+// The playing entry is outlined too, dimly, in place of the window's
+// violet wash; where the two meet, the selection's edge is drawn.
+
+// outline is how an entry is outlined: not, as playing, or as selected.
+type outline int
+
+const (
+	outlineNone outline = iota
+	outlinePlaying
+	outlineSelected
+)
+
+func (o outline) color() color.Color {
+	if o == outlinePlaying {
+		return playingEdge
+	}
+	return brand
+}
+
+// outlineEdge is a line of room between two list rows: the top edge
+// (╭──╮) of an outlined entry below it, or the bottom edge (╰──╯) of one
+// above; blank between plain entries.
 type outlineEdge struct {
 	layout.NodeBase
-	below    bool // the edge under the selected entry
-	selected bool
+	below bool // the edge under the entry above
+	kind  outline
 }
 
 func (e outlineEdge) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
 
 func (e outlineEdge) Render(r layout.Rect) string {
-	if !e.selected || r.W < 2 {
+	if e.kind == outlineNone || r.W < 2 {
 		return strings.Repeat(" ", max(r.W, 0))
 	}
 	left, right := "╭", "╮"
 	if e.below {
 		left, right = "╰", "╯"
 	}
-	return lipgloss.NewStyle().Foreground(brand).Render(left + strings.Repeat("─", r.W-2) + right)
+	return lipgloss.NewStyle().Foreground(e.kind.color()).Render(left + strings.Repeat("─", r.W-2) + right)
 }
 
-// outlineSide is a side of the selected entry's outline, down its height.
-type outlineSide struct{ layout.NodeBase }
+// outlineSide is a side of an entry's outline, down its height.
+type outlineSide struct {
+	layout.NodeBase
+	kind outline
+}
 
 func (outlineSide) Size() (layout.Size, layout.Size) { return layout.Fixed(1), layout.Grow(1) }
 
-func (outlineSide) Render(r layout.Rect) string {
-	return lipgloss.NewStyle().Foreground(brand).Render(strings.TrimSuffix(strings.Repeat("│\n", max(r.H, 0)), "\n"))
+func (o outlineSide) Render(r layout.Rect) string {
+	return lipgloss.NewStyle().Foreground(o.kind.color()).Render(strings.TrimSuffix(strings.Repeat("│\n", max(r.H, 0)), "\n"))
 }
 
 // roomyRows puts a line of room before each of rows' entries in a
@@ -102,22 +126,34 @@ func roomyRows(rows *layout.Col) {
 	if len(rows.Children) == 0 {
 		return
 	}
-	selected := func(n layout.Node) bool {
+	kindOf := func(n layout.Node) outline {
 		r, ok := n.(layout.Row)
-		return ok && r.Box.Selected && r.Box.Background == termSelectBg
+		if !ok {
+			return outlineNone
+		}
+		if r.Box.Selected && r.Box.Background == termSelectBg {
+			return outlineSelected
+		}
+		for _, child := range r.Children {
+			if inner, ok := child.(layout.Row); ok && inner.Box.Background == playingBg {
+				return outlinePlaying
+			}
+		}
+		return outlineNone
 	}
-	marked := make([]bool, len(rows.Children))
+	marked := make([]outline, len(rows.Children))
 	for i, c := range rows.Children {
-		if !selected(c) {
+		kind := kindOf(c)
+		if kind == outlineNone {
 			continue
 		}
-		marked[i] = true
+		marked[i] = kind
 		// The outline marks it instead of a fill; its sides take a column of
 		// the entry's padding each, so its content stays put.
 		r := c.(layout.Row)
 		r.Box.Background = nil
 		inner := make([]layout.Node, 0, len(r.Children)+2)
-		inner = append(inner, outlineSide{})
+		inner = append(inner, outlineSide{kind: kind})
 		for _, child := range r.Children {
 			if row, ok := child.(layout.Row); ok {
 				row.Box.Background = nil
@@ -126,14 +162,45 @@ func roomyRows(rows *layout.Col) {
 			}
 			inner = append(inner, child)
 		}
-		r.Children = append(inner, outlineSide{})
+		r.Children = append(inner, outlineSide{kind: kind})
 		rows.Children[i] = r
 	}
 	// A line of room before the first entry too, for its top edge.
 	out := make([]layout.Node, 0, 2*len(rows.Children)+1)
 	for i, c := range rows.Children {
-		above := i > 0 && marked[i-1]
-		out = append(out, outlineEdge{selected: above || marked[i], below: above}, c)
+		above := outlineNone
+		if i > 0 {
+			above = marked[i-1]
+		}
+		// The brighter of the two outlines meeting here draws its edge.
+		edge := outlineEdge{kind: marked[i]}
+		if above > marked[i] {
+			edge = outlineEdge{kind: above, below: true}
+		}
+		out = append(out, edge, c)
 	}
 	rows.Children, rows.Gap = out, 0
+}
+
+// equalizerStep is how often the playing entry's equalizer moves.
+const equalizerStep = 220 * time.Millisecond
+
+// equalizerBars is the terminal's playing indicator at frame f: three bars
+// rising and falling at their own paces while playing, still when paused.
+func equalizerBars(f int, playing bool) string {
+	if !playing {
+		return "▃▅▂"
+	}
+	levels := []rune("▁▂▃▄▅▆▇")
+	var b strings.Builder
+	for i, pace := range []int{3, 5, 4} {
+		// A triangle wave over the levels, each bar its own speed and phase.
+		n := len(levels)*2 - 2
+		step := (f*pace + i*4) % n
+		if step >= len(levels) {
+			step = n - step
+		}
+		b.WriteRune(levels[step])
+	}
+	return b.String()
 }
