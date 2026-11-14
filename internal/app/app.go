@@ -632,13 +632,15 @@ func refreshStatus(s *State) {
 // same list selected when it is still there.
 func libraryChanged(s *State) {
 	lib := s.library()
-	s.rail.SetCount(len(lib))
-	for i, pl := range lib {
-		if pl.URI == s.shown {
-			s.rail.Select(i)
-			break
+	keepView(&s.rail, func() {
+		s.rail.SetCount(len(lib))
+		for i, pl := range lib {
+			if pl.URI == s.shown {
+				s.rail.Select(i)
+				break
+			}
 		}
-	}
+	})
 	showSelected(s)
 }
 
@@ -1735,6 +1737,7 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	if m.Button != flatte.MouseLeft || m.Action != flatte.MousePress {
 		return
 	}
+	s.logf("click %d,%d on %q", m.X, m.Y, m.Target)
 	focusBefore := s.focus
 	if m.Target != idTrackFilter && m.Target != idTrackFilterBox && m.Target != idTrackFilterToggle {
 		blurTrackFilter(s)

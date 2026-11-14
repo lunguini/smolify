@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"errors"
+	"image"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +167,7 @@ func TestTerminalHomeCardOpensFromItsPicture(t *testing.T) {
 	s.username = "test-user"
 	d.Send(flatte.MenuEvent{ID: cmdHome})
 	d.Settle()
+	s.covers["u"] = image.NewRGBA(image.Rect(0, 0, 64, 64))
 	d.Resize(140, 40)
 	d.Settle()
 	_, comp := flatte.ComposeFrame(d.Frame(), 140, 40)

@@ -1,12 +1,15 @@
 package app
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatest"
 	"github.com/lunguini/flatte/flatui/layout"
+
+	"github.com/lunguini/smolify/internal/model"
 )
 
 // In a terminal the search field is framed, its frame lights up in the
@@ -55,5 +58,28 @@ func TestTerminalPlayerControlsGrowWithWidth(t *testing.T) {
 	narrow := layout.Compose(playerBar(s, false, 100), 100, 8)
 	if strings.Contains(narrow.Frame, "╭") || !strings.Contains(flatest.CleanFrame(narrow.Frame), "⇄") {
 		t.Errorf("narrow player is framed or lost its glyphs:\n%s", flatest.CleanFrame(narrow.Frame))
+	}
+}
+
+func TestArrivingPagesKeepAListScrolledAwayFromItsSelection(t *testing.T) {
+	s := &State{listings: map[string]model.Listing{}}
+	var tracks []model.Track
+	for i := range 100 {
+		tracks = append(tracks, model.Track{URI: "spotify:track:" + strconv.Itoa(i)})
+	}
+	s.shown = "p"
+	s.listings["p"] = model.Listing{URI: "p", Tracks: tracks[:50]}
+	s.tracks.SetCount(50)
+	s.tracks.SetHeight(10)
+	s.tracks.Select(2)
+	s.tracks.Scroll(30) // dragging the scroll bar down, away from row 2
+	replaceListing(s, "p", model.Listing{URI: "p", Tracks: tracks})
+	if s.tracks.Offset() != 30 || s.tracks.Cursor() != 2 {
+		t.Fatalf("a page arriving moved the view to %d (selection %d), want it left at 30", s.tracks.Offset(), s.tracks.Cursor())
+	}
+	s.tracks.Scroll(-30) // back on the selection: arrivals keep it in view
+	replaceListing(s, "p", model.Listing{URI: "p", Tracks: tracks})
+	if s.tracks.Offset() != 0 {
+		t.Fatalf("offset %d with the selection in view", s.tracks.Offset())
 	}
 }

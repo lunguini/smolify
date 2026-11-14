@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lunguini/flatte"
+	"github.com/lunguini/flatte/flatui"
 	"github.com/lunguini/flatte/flatui/layout"
 	"github.com/lunguini/smolify/internal/model"
 )
@@ -197,7 +198,20 @@ func replaceListing(s *State, uri string, l model.Listing) {
 	selected, ok := s.selectedTrack()
 	s.listings[uri] = l
 	if uri == s.shown {
-		keepTrack(s, selected.URI, ok)
+		keepView(&s.tracks, func() { keepTrack(s, selected.URI, ok) })
+	}
+}
+
+// keepView runs update, which may select a row, on l; when the selection
+// was scrolled out of view (the user is looking elsewhere, or dragging the
+// scroll bar), the view stays where it was instead of jumping back to it as
+// pages of data arrive.
+func keepView(l *flatui.List, update func()) {
+	offset := l.Offset()
+	away := l.Height() > 0 && (l.Cursor() < offset || l.Cursor() >= offset+l.Height())
+	update()
+	if away {
+		l.Scroll(offset - l.Offset())
 	}
 }
 
