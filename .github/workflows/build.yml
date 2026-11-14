@@ -5,6 +5,7 @@ on:
     branches: [main, web]
   pull_request:
   workflow_dispatch:
+  workflow_call: # the release builds with this matrix
 
 permissions:
   contents: read
