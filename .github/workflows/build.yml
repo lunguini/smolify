@@ -56,6 +56,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libogg-dev libvorbis-dev libflac-dev libmpg123-dev libasound2-dev
+      - name: Static codecs (macOS, Linux)
+        if: matrix.goos != 'windows'
+        # The runner is thrown away: removing the codecs' shared libraries
+        # leaves the linker their static archives, so users need nothing
+        # installed. ALSA and the system libraries stay shared.
+        run: |
+          if [ "${{ matrix.goos }}" = darwin ]; then
+            for f in libogg libvorbis flac mpg123; do rm -f "$(brew --prefix $f)"/lib/*.dylib; done
+          else
+            sudo rm -f /usr/lib/*-linux-gnu/lib{ogg,vorbis,vorbisenc,vorbisfile,FLAC,mpg123}.so
+          fi
+          echo 'PKG_CONFIG=pkg-config --static' >> "$GITHUB_ENV"
+
       - name: Audio codecs (Windows)
         if: matrix.goos == 'windows'
         uses: msys2/setup-msys2@v2
