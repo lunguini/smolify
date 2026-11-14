@@ -73,10 +73,11 @@ jobs:
       - name: Static link flags (Windows)
         if: matrix.goos == 'windows'
         run: |
-          nm /mingw64/lib/libogg.a | grep -i iovec || echo "no iovec symbols in libogg.a"
-          nm -D /mingw64/bin/libogg-0.dll 2>/dev/null | grep -i iovec || objdump -p /mingw64/bin/libogg-0.dll | grep -i iovec || echo "no iovec export in libogg dll"
+          # libogg's DLL leaves out symbols vorbis-go binds; the static
+          # libraries have them, and make a single .exe.
           echo 'EXTLDFLAGS=-static' >> "$GITHUB_ENV"
           echo 'PKG_CONFIG=pkgconf --static' >> "$GITHUB_ENV"
+          echo 'CGO_CFLAGS=-DFLAC__NO_DLL' >> "$GITHUB_ENV"
 
       - name: Build
         env:
