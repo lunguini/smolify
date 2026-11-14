@@ -387,7 +387,7 @@ func worded(b layout.Button, g bool, word string) layout.Button {
 // topBar sits in the window's title strip, right of its buttons: back
 // and forward, and the search field in the middle.
 // barLines is the terminal top bar's height above the divider under it.
-const barLines = 4
+const barLines = 3
 
 // historyColumns is a back or forward key's width: its side, then an odd
 // number of columns about twice the bar's height.
@@ -404,9 +404,9 @@ func terminalTopBar(s *State) layout.Node {
 	}
 	// key is one of the bar's keys: its left side, its content, and its
 	// stretch of the divider, from junction on.
-	// Keys are four lines tall, their content on the third: room from the
-	// terminal's top edge (two lines, which its own edge crowds) and from
-	// the divider, and a bigger target.
+	// Keys are three lines tall, their content on the middle one: room
+	// from the terminal's top edge and from the divider, and a bigger
+	// target.
 	key := func(id string, w layout.Size, junction string, content layout.Node) layout.Node {
 		return layout.Col{NodeBase: layout.NodeBase{ID: id, W: w, H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
 			layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(barLines)}, Children: []layout.Node{
