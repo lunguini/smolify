@@ -174,6 +174,10 @@ type State struct {
 	dragValue float64
 	// eqFrame steps the terminal's playing-row equalizer (see equalizerBars).
 	eqFrame int
+	// filterGrow is the terminal filter field's opening frame while
+	// filterScope animates it (see growFilter).
+	filterGrow  int
+	filterScope *flatte.Scope
 	// dragGrab is the line of a scroll bar's thumb the pointer holds, so
 	// the thumb follows the pointer from where it was grabbed.
 	dragGrab int

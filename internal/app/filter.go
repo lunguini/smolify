@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui"
@@ -34,7 +35,7 @@ func filterView(s *State, g bool) layout.Node {
 	field.Placeholder = "Filter songs"
 	field.W = layout.Grow(1)
 	icon := layout.Icon{NodeBase: layout.NodeBase{W: layout.Fixed(2)}, Name: layout.IconSearch, Text: "⌕ ", Style: subtle}
-	base := layout.NodeBase{ID: idTrackFilterBox, W: layout.Fixed(26), H: layout.Fixed(3), Gap: 1, PadLeft: 1, PadRight: 1,
+	base := layout.NodeBase{ID: idTrackFilterBox, W: layout.Fixed(filterWidth(s)), H: layout.Fixed(3), Gap: 1, PadLeft: 1, PadRight: 1,
 		Box: layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}}
 	if focused {
 		base.Box.BorderColor = brand
@@ -49,9 +50,54 @@ func filterView(s *State, g bool) layout.Node {
 }
 
 func openTrackFilter(s *State) {
+	opening := !s.trackFilterOpen
 	s.trackFilterOpen = true
 	s.focus = paneTrackFilter
 	s.trackSort.Close()
+	if opening && !s.windowed {
+		growFilter(s)
+	}
+}
+
+// The terminal's Find key opens into the filter field by growing to the
+// field's width over a few frames, rather than jumping.
+const (
+	findColumns   = 10 // the Find key, framed
+	filterColumns = 26 // the open field, framed
+	filterSteps   = 6
+	filterStep    = 25 * time.Millisecond
+)
+
+// growFilter animates the field open: filterGrow counts its frames up to
+// filterSteps, then the timer stops.
+func growFilter(s *State) {
+	if s.filterScope != nil {
+		s.filterScope.Cancel()
+	}
+	s.filterGrow = 0
+	scope := flatte.NewScope(s.fx, "filter-grow")
+	s.filterScope = scope
+	_ = flatte.ScopeEvery(scope, s.fx, filterStep, func(s *State, _ time.Time) {
+		s.filterGrow++
+		if s.filterGrow >= filterSteps {
+			s.filterGrow = filterSteps
+			scope.Cancel()
+			if s.filterScope == scope {
+				s.filterScope = nil
+			}
+		}
+	})
+}
+
+// filterWidth is the open field's width at the current frame, easing out
+// (fast, then settling) from the Find key's width.
+func filterWidth(s *State) int {
+	if s.filterScope == nil {
+		return filterColumns
+	}
+	t := float64(s.filterGrow) / filterSteps
+	t = 1 - (1-t)*(1-t)
+	return findColumns + int(float64(filterColumns-findColumns)*t+0.5)
 }
 
 func blurTrackFilter(s *State) {

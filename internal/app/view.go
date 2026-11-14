@@ -61,7 +61,13 @@ func accountID(name string) bool {
 const (
 	railWidth    = 32
 	railRowLines = 2
+	// termRailWidth is the rail's width in a terminal: wider, so more of a
+	// playlist's name shows beside its cover.
+	termRailWidth = 40
 )
+
+// rail is the library rail's width in columns.
+func rail(g bool) int { return pick(g, railWidth, termRailWidth) }
 
 // card is a rounded panel on the window (cardBg unless nb has a
 // background).
@@ -78,8 +84,22 @@ func card(nb layout.NodeBase, children ...layout.Node) layout.Col {
 const headerToolsColumns = 120
 
 // navLines is the terminal rail's Home and Search section's height: a
-// line of room, the two items, and a line of room.
-const navLines = 4
+// line of room, their framed keys, and a line of room.
+const navLines = 5
+
+// navKey is a terminal's key for a page: framed as the search field is,
+// lit while the page is shown.
+func navKey(s *State, id, label string, p page) layout.Node {
+	b := layout.Button{NodeBase: layout.NodeBase{ID: id, W: layout.Grow(1), H: layout.Fixed(3), PadLeft: 1, PadRight: 1,
+		Box: layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}}, Label: label, Plain: true, Style: subtle}
+	if s.page == p {
+		b.Box.BorderColor, b.Style = brand, layout.TextStyle{Bold: true, Fg: white}
+	}
+	if s.web == nil && p == pageSearch {
+		b.Disabled = true
+	}
+	return b
+}
 
 // terminalRoot is the signed-in screen in a terminal: sections split by
 // single lines that run to the terminal's edges, which frame the whole.
@@ -88,14 +108,13 @@ func terminalRoot(s *State, width int) layout.Node {
 		return layout.Col{NodeBase: layout.NodeBase{PadLeft: 1, PadRight: 1}, Children: []layout.Node{n}}
 	}
 	return layout.Col{Children: []layout.Node{
-		pad(topBar(s, false)),
-		newHRule(map[int]string{railWidth: "┬"}),
+		terminalTopBar(s),
 		layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{
 			railView(s, false),
 			newVRule(map[int]string{navLines: "┤"}),
 			layout.Col{NodeBase: layout.NodeBase{ID: "center-card", W: layout.Grow(1)}, Children: []layout.Node{centerView(s, false, width)}},
 		}},
-		newHRule(map[int]string{railWidth: "┴"}),
+		newHRule(map[int]string{termRailWidth: "┴"}),
 		pad(playerBar(s, false, width)),
 	}}
 }
@@ -227,8 +246,10 @@ func railView(s *State, g bool) layout.Node {
 		layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1), Gap: 1}, Children: []layout.Node{rows, listBar(s.rail, idRailBar)}},
 	}
 	if !g { // the app's name is in the top bar; a line splits the sections
-		return layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth)}, Children: []layout.Node{
-			layout.Col{NodeBase: layout.NodeBase{H: layout.Fixed(navLines), PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1}, Children: nav},
+		return layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(termRailWidth)}, Children: []layout.Node{
+			layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(navLines), Gap: 1, PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1}, Children: []layout.Node{
+				navKey(s, idHome, "⌂ Home", pageHome), navKey(s, idSearch, "⌕ Search", pageSearch),
+			}},
 			newHRule(nil),
 			layout.Col{NodeBase: layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1}, Children: library},
 		}}
@@ -361,6 +382,57 @@ func worded(b layout.Button, g bool, word string) layout.Button {
 
 // topBar sits in the window's title strip, right of its buttons: back
 // and forward, and the search field in the middle.
+// terminalTopBar is the top bar in a terminal: the logo and name over the
+// rail, then the history keys, the search field, and Settings, framed as
+// keys standing on the divider under the bar.
+func terminalTopBar(s *State) layout.Node {
+	centered := func(n layout.Node) layout.Node {
+		return layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{layout.NewSpacer(), n, layout.NewSpacer()}}
+	}
+	history := func(id, arrow string, can bool) layout.Node {
+		style := layout.TextStyle{Bold: true}
+		if !can {
+			style = subtle
+		}
+		// Square on screen: twice as many columns as lines.
+		return barKey(id, layout.Fixed(6), false, centered(layout.Label{Text: arrow, Style: style}))
+	}
+	focused := s.focus == paneSearch
+	field := s.query.Layout(idQuery, focused)
+	field.Clearable = true
+	field.Placeholder = "What do you want to play?"
+	field.W = layout.Grow(1)
+	icon := layout.Icon{NodeBase: layout.NodeBase{H: layout.Fixed(1)}, Name: layout.IconSearch, Text: "⌕ ", Style: subtle}
+	if focused {
+		icon.Style = layout.TextStyle{Fg: brand}
+	}
+	search := layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: 1, PadLeft: 1, PadRight: 1}, Children: []layout.Node{icon, field}}
+	settings := layout.Label{Text: "⚙ Settings", Style: layout.TextStyle{Bold: true}}
+	if s.page == pageSettings {
+		settings.Style.Fg = brand
+	}
+	brandMark := layout.Col{NodeBase: layout.NodeBase{ID: "brand", W: layout.Fixed(termRailWidth), H: layout.Fixed(3)}, Children: []layout.Node{
+		layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(2), PadLeft: 1, Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
+			// The logo two lines tall, square on screen, beside the name.
+			picture(s, false, layout.Image{NodeBase: layout.NodeBase{W: layout.Fixed(4), H: layout.Fixed(2)}, Source: logo(), Text: "♫", Fit: layout.ImageContain}),
+			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Fg: brand}},
+		}},
+		newBarFill(layout.Grow(1), "").withHeight(1),
+	}}
+	return layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(3)}, Children: []layout.Node{
+		brandMark,
+		newBarFill(layout.Fixed(2), "┬"),
+		history(idBack, "←", len(s.back) > 0),
+		newBarFill(layout.Fixed(1), ""),
+		history(idForward, "→", len(s.forward) > 0),
+		newBarFill(layout.Fixed(1), ""),
+		barKey(idSearchBox, layout.Grow(1), focused, search),
+		newBarFill(layout.Fixed(1), ""),
+		barKey(idSettings, layout.Fixed(14), s.page == pageSettings, centered(settings)),
+		newBarFill(layout.Fixed(1), ""),
+	}}
+}
+
 func topBar(s *State, g bool) layout.Node {
 	nav := func(id string, icon layout.IconName, label, tip string, can bool) layout.Node {
 		b := layout.Button{NodeBase: layout.NodeBase{ID: id, Tooltip: tip, W: layout.Points(32), H: layout.Points(32)}, Icon: icon, Label: label, Plain: true, Disabled: !can}
@@ -381,9 +453,11 @@ func topBar(s *State, g bool) layout.Node {
 	bar := layout.NodeBase{Gap: 1}
 	// The rail's slot: empty under a window's buttons, the app's name in a
 	// terminal, which has none.
-	var lead layout.Node = layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth)}}
+	var lead layout.Node = layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(rail(g))}}
 	if !g {
-		lead = layout.Row{NodeBase: layout.NodeBase{ID: "brand", W: layout.Fixed(railWidth), PadLeft: 1}, Align: layout.AlignCenter, Children: []layout.Node{
+		lead = layout.Row{NodeBase: layout.NodeBase{ID: "brand", W: layout.Fixed(rail(g)), PadLeft: 1, Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
+			// The logo as tall as the bar (square on screen), beside the name.
+			picture(s, g, layout.Image{NodeBase: layout.NodeBase{W: layout.Fixed(6), H: layout.Fixed(3)}, Source: logo(), Text: "♫", Fit: layout.ImageContain}),
 			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Fg: brand}},
 		}}
 		// A framed field, lit while it has the keyboard.
@@ -485,8 +559,13 @@ func centerView(s *State, g bool, width int) layout.Node {
 	}
 	info := []layout.Node{
 		layout.Label{Text: browseHeading(s), Style: layout.TextStyle{Bold: true, Size: 12, Leading: 1.1}},
-		layout.Label{NodeBase: layout.NodeBase{ID: "playlist-title", Tooltip: pl.Name}, Text: pl.Name, Truncate: true, Style: layout.TextStyle{Bold: true, Size: 30, Fg: white, Leading: 1.05}},
 	}
+	if !g { // a line of room between the kind and the name
+		info = append(info, layout.Label{})
+	}
+	info = append(info,
+		layout.Label{NodeBase: layout.NodeBase{ID: "playlist-title", Tooltip: pl.Name}, Text: pl.Name, Truncate: true, Style: layout.TextStyle{Bold: true, Size: 30, Fg: white, Leading: 1.05}},
+	)
 	descriptionStyle := subtle
 	descriptionStyle.Leading = 1.1
 	if pl.Description != "" {
@@ -942,7 +1021,7 @@ func playerBar(s *State, g bool, width int) layout.Node {
 	default:
 		coverSize = 3 * layout.PointsPerLine
 	}
-	now := layout.Row{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth), Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
+	now := layout.Row{NodeBase: layout.NodeBase{W: layout.Fixed(rail(g)), Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 		cover(s, coverURL, coverSize, g),
 		layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{
 			layout.Label{Text: title, Truncate: true, Style: strong},
@@ -1115,7 +1194,9 @@ func trackLinkID(uri string, row int, part string) string {
 
 // loadingView centers the complete brand stack, including its artwork.
 func loadingView(s *State, g bool) layout.Node {
-	var mark layout.Node = layout.Label{NodeBase: layout.NodeBase{ID: "loading-logo"}, Text: "♫", Style: layout.TextStyle{Fg: brand}}
+	// A terminal draws the logo as a picture (16×8 cells, square on
+	// screen), or its ♫ where images are off.
+	var mark layout.Node = picture(s, g, layout.Image{NodeBase: layout.NodeBase{ID: "loading-logo", W: layout.Fixed(16), H: layout.Fixed(8)}, Source: logo(), Text: "♫", Fit: layout.ImageContain})
 	if g {
 		mark = layout.Image{NodeBase: layout.NodeBase{ID: "loading-logo", W: layout.Points(loadingLogoPoints), H: layout.Points(loadingLogoPoints)}, Source: logo(), Fit: layout.ImageContain}
 	}

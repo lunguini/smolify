@@ -204,3 +204,89 @@ func equalizerBars(f int, playing bool) string {
 	}
 	return b.String()
 }
+
+// The terminal's top bar sits on the divider under it: each framed key's
+// bottom edge is that divider (┴────┴), so the bar and the line are one
+// border rather than boxes above a rule.
+
+// barFill is a stretch of the top bar with nothing framed in it: blank
+// above, its share of the divider on its last line (from tee on, when set).
+type barFill struct {
+	layout.NodeBase
+	tee string
+}
+
+func newBarFill(w layout.Size, tee string) barFill {
+	return barFill{NodeBase: layout.NodeBase{W: w, H: layout.Fixed(3)}, tee: tee}
+}
+
+func (f barFill) Size() (layout.Size, layout.Size) { return f.W, f.H }
+
+func (f barFill) Render(r layout.Rect) string {
+	if r.W <= 0 || r.H <= 0 {
+		return ""
+	}
+	line := strings.Repeat("─", r.W)
+	if f.tee != "" {
+		line = f.tee + strings.Repeat("─", r.W-1)
+	}
+	lines := make([]string, r.H)
+	for i := range lines[:r.H-1] {
+		lines[i] = strings.Repeat(" ", r.W)
+	}
+	lines[r.H-1] = lipgloss.NewStyle().Foreground(searchBorder).Render(line)
+	return strings.Join(lines, "\n")
+}
+
+// keyEdge is a framed key's top edge (╭──╮), or its bottom edge where it
+// joins the divider (┴──┴).
+type keyEdge struct {
+	layout.NodeBase
+	bottom bool
+	color  color.Color
+}
+
+func (keyEdge) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
+
+func (e keyEdge) Render(r layout.Rect) string {
+	if r.W < 2 {
+		return strings.Repeat(" ", max(r.W, 0))
+	}
+	left, right, c := "╭", "╮", e.color
+	if e.bottom {
+		left, right, c = "┴", "┴", searchBorder
+	}
+	return lipgloss.NewStyle().Foreground(c).Render(left + strings.Repeat("─", r.W-2) + right)
+}
+
+// keySide is a framed key's side, one line tall.
+type keySide struct {
+	layout.NodeBase
+	color color.Color
+}
+
+func (keySide) Size() (layout.Size, layout.Size) { return layout.Fixed(1), layout.Fixed(1) }
+
+func (k keySide) Render(layout.Rect) string {
+	return lipgloss.NewStyle().Foreground(k.color).Render("│")
+}
+
+// barKey frames content as a key of the top bar, w wide, lit in the accent
+// when lit; clicks anywhere on it target id.
+func barKey(id string, w layout.Size, lit bool, content layout.Node) layout.Node {
+	c := color.Color(searchBorder)
+	if lit {
+		c = brand
+	}
+	return layout.Col{NodeBase: layout.NodeBase{ID: id, W: w, H: layout.Fixed(3)}, Children: []layout.Node{
+		keyEdge{color: c},
+		layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(1)}, Children: []layout.Node{keySide{color: c}, content, keySide{color: c}}},
+		keyEdge{bottom: true},
+	}}
+}
+
+// withHeight is f h lines tall: its divider on the last.
+func (f barFill) withHeight(h int) barFill {
+	f.H = layout.Fixed(h)
+	return f
+}

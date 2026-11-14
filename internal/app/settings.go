@@ -1,6 +1,7 @@
 package app
 
 import (
+	"charm.land/lipgloss/v2"
 	"context"
 	"errors"
 	"strconv"
@@ -400,7 +401,8 @@ func settingsView(s *State, g bool, width int) layout.Node {
 			r.PadTop, r.PadBottom = 0, 0
 			r.H = layout.Points(48)
 		} else {
-			r.PadBottom = 1 // a line of room under each setting
+			// A faint rule under each setting, so a control pairs with its name.
+			return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{r, settingsRule{}}}
 		}
 		return r
 	}
@@ -411,7 +413,11 @@ func settingsView(s *State, g bool, width int) layout.Node {
 	name.Clearable = true
 	name.W = layout.Fixed(24)
 	section := func(title string) layout.Node {
-		return layout.Col{NodeBase: layout.NodeBase{PadTop: pick(g, 2, 1), PadBottom: 1, PadLeft: 1}, Children: []layout.Node{layout.Label{Text: title, Style: caption}}}
+		heading := layout.Node(layout.Label{Text: title, Style: caption})
+		if !g { // the heading leads a rule across the section
+			heading = layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: 1}, Children: []layout.Node{heading, newHRule(nil)}}
+		}
+		return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), PadTop: pick(g, 2, 1), PadBottom: 1, PadLeft: 1}, Children: []layout.Node{heading}}
 	}
 	applyLabel := "Apply now"
 	if s.applyingAudio {
@@ -466,7 +472,7 @@ func settingsWidth(g bool, width int) layout.Size {
 	if g || width <= 0 {
 		return layout.Grow(1)
 	}
-	return layout.Fixed(max(min(settingsColumns, width-railWidth-3), 20))
+	return layout.Fixed(max(min(settingsColumns, width-termRailWidth-3), 20))
 }
 
 // clampSettings bounds the page's scroll by its content, as last laid out
@@ -554,3 +560,15 @@ func settingClicked(s *State, target string) bool {
 	}
 	return true
 }
+
+// settingsRule is the faint line under a setting in a terminal.
+type settingsRule struct{ layout.NodeBase }
+
+func (settingsRule) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
+
+func (settingsRule) Render(r layout.Rect) string {
+	return lipgloss.NewStyle().Foreground(settingsRuleColor).Render(" " + strings.Repeat("┄", max(r.W-2, 0)) + " ")
+}
+
+// settingsRuleColor is fainter than the dividers: it groups, not splits.
+var settingsRuleColor = lipgloss.Color("#2c2c2c")

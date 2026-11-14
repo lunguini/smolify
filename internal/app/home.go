@@ -232,7 +232,7 @@ func homeGridGeometry(s *State, graphical bool, frameWidth int) (columns, cardWi
 	}
 	width := s.discovery.HomeRects[idHomeContent].W
 	if width <= 0 {
-		width = max(12, frameWidth-railWidth-8)
+		width = max(12, frameWidth-termRailWidth-8)
 	}
 	gap, pad = 1, 1
 	const minCard = 18

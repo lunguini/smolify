@@ -763,7 +763,8 @@ func TestSearchPasteAndErrors(t *testing.T) {
 	}
 	f.webFail = spotify.Error{Status: 403, Message: "Insufficient client scope"}
 	typeText(d, "!")
-	if fr := plain(d.Frame()); !strings.Contains(fr, "Could not search: Spotify: Insufficient client scope (403)") {
+	// Wrapped as the pane's width wants; the words are what count.
+	if fr := plain(d.Frame()); !strings.Contains(strings.Join(strings.Fields(strings.ReplaceAll(fr, "│", " ")), " "), "Could not search: Spotify: Insufficient client scope (403)") {
 		t.Fatalf("error:\n%s", fr)
 	}
 	f.webFail = nil

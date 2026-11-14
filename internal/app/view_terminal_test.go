@@ -151,3 +151,31 @@ func TestPlayingRowIsDimlyOutlinedNotWashed(t *testing.T) {
 		t.Fatalf("no equalizer for the playing song:\n%s", plain(fr))
 	}
 }
+
+func TestFindOpensSmoothlyIntoTheFilterField(t *testing.T) {
+	s := &State{}
+	if filterWidth(s) != filterColumns {
+		t.Fatal("a field not opening is not at its full width")
+	}
+	s.filterScope = &flatte.Scope{}
+	last := 0
+	for s.filterGrow = 0; s.filterGrow <= filterSteps; s.filterGrow++ {
+		w := filterWidth(s)
+		if w < last || w < findColumns || w > filterColumns {
+			t.Fatalf("frame %d: width %d after %d", s.filterGrow, w, last)
+		}
+		last = w
+	}
+	if last != filterColumns {
+		t.Fatalf("ends at %d, want %d", last, filterColumns)
+	}
+}
+
+func TestTerminalTopBarStandsOnTheDivider(t *testing.T) {
+	s := sampleApp().State
+	fr, _ := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 160}), 160, 40)
+	lines := strings.Split(plain(fr), "\n")
+	if len(lines) < 3 || strings.Count(lines[2], "┴") < 8 || []rune(lines[2])[termRailWidth] != '┬' {
+		t.Fatalf("the keys do not join the divider:\n%s", strings.Join(lines[:3], "\n"))
+	}
+}
