@@ -6,6 +6,10 @@ A small, fast Spotify client for the terminal and the desktop, built with
 
 Work in progress. Requires Spotify Premium. Not affiliated with Spotify.
 
+<p align="center">
+  <img src="assets/smolify-loop.webp" alt="Smolify in a terminal turning into Smolify in a Mac window and back" width="960">
+</p>
+
 ## Install
 
 With Go 1.26 or later, until there are Homebrew and release builds:
