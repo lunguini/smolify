@@ -1,0 +1,93 @@
+name: Build
+
+on:
+  push:
+    branches: [main, web]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - name: Audio codecs
+        run: brew install pkg-config libogg libvorbis flac mpg123
+      - name: Format
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+
+  build:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-latest, goos: darwin, goarch: arm64 }
+          - { runner: macos-13, goos: darwin, goarch: amd64 }
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { runner: windows-latest, goos: windows, goarch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: ${{ matrix.goos == 'windows' && 'msys2 {0}' || 'bash' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+
+      - name: Audio codecs (macOS)
+        if: matrix.goos == 'darwin'
+        run: brew install pkg-config libogg libvorbis flac mpg123
+      - name: Audio codecs (Linux)
+        if: matrix.goos == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libogg-dev libvorbis-dev libflac-dev libmpg123-dev libasound2-dev
+      - name: Audio codecs (Windows)
+        if: matrix.goos == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-libogg
+            mingw-w64-x86_64-libvorbis
+            mingw-w64-x86_64-flac
+            mingw-w64-x86_64-mpg123
+            mingw-w64-x86_64-ntldd
+
+      - name: Build
+        env:
+          CGO_ENABLED: "1"
+        run: go build -trimpath -ldflags "-s -w" -o dist/smolify${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/smolify
+
+      - name: Linked libraries
+        run: |
+          case "${{ matrix.goos }}" in
+            darwin) otool -L dist/smolify ;;
+            linux) ldd dist/smolify ;;
+            windows) ntldd -R dist/smolify.exe ;;
+          esac
+
+      - name: Smoke test
+        run: ./dist/smolify${{ matrix.goos == 'windows' && '.exe' || '' }} -h 2>&1 | grep -- -demo
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smolify-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
