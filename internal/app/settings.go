@@ -384,7 +384,7 @@ func deviceKey(s *State, k flatte.KeyEvent, fx flatte.Effects[State]) {
 
 // settingsView is the Settings page: sections of rows, each a name and a
 // line about it on the left and its control on the right.
-func settingsView(s *State, g bool) layout.Node {
+func settingsView(s *State, g bool, width int) layout.Node {
 	st := s.settings
 	settingIDs := settingRows(s)
 	cursor := ""
@@ -399,6 +399,8 @@ func settingsView(s *State, g bool) layout.Node {
 		if g {
 			r.PadTop, r.PadBottom = 0, 0
 			r.H = layout.Points(48)
+		} else {
+			r.PadBottom = 1 // a line of room under each setting
 		}
 		return r
 	}
@@ -409,7 +411,7 @@ func settingsView(s *State, g bool) layout.Node {
 	name.Clearable = true
 	name.W = layout.Fixed(24)
 	section := func(title string) layout.Node {
-		return layout.Col{NodeBase: layout.NodeBase{PadTop: 2, PadBottom: 1, PadLeft: 1}, Children: []layout.Node{layout.Label{Text: title, Style: caption}}}
+		return layout.Col{NodeBase: layout.NodeBase{PadTop: pick(g, 2, 1), PadBottom: 1, PadLeft: 1}, Children: []layout.Node{layout.Label{Text: title, Style: caption}}}
 	}
 	applyLabel := "Apply now"
 	if s.applyingAudio {
@@ -449,8 +451,22 @@ func settingsView(s *State, g bool) layout.Node {
 		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Fg: danger}, Disabled: !supportsSignOut(s)}),
 	)
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Grow(1), Pad: pick(g, 2, 1)}, Children: []layout.Node{
-		layout.Scroll{NodeBase: layout.NodeBase{ID: idSettingsScroll, W: layout.Grow(1), H: layout.Grow(1)}, OffsetY: s.settingsScroll, Child: layout.Col{NodeBase: layout.NodeBase{ID: idSettingsContent, W: layout.Grow(1)}, Children: body}},
+		layout.Scroll{NodeBase: layout.NodeBase{ID: idSettingsScroll, W: layout.Grow(1), H: layout.Grow(1)}, OffsetY: s.settingsScroll, Child: layout.Col{NodeBase: layout.NodeBase{ID: idSettingsContent, W: settingsWidth(g, width)}, Children: body}},
 	}}
+}
+
+// settingsColumns is the widest a terminal's settings rows get: across a
+// wide pane, a control far from its name is hard to pair with it.
+const settingsColumns = 80
+
+// settingsWidth is the settings rows' width: a window's pane, or up to
+// settingsColumns of a terminal's (its center pane less the rail, its
+// divider, and padding).
+func settingsWidth(g bool, width int) layout.Size {
+	if g || width <= 0 {
+		return layout.Grow(1)
+	}
+	return layout.Fixed(max(min(settingsColumns, width-railWidth-3), 20))
 }
 
 // clampSettings bounds the page's scroll by its content, as last laid out

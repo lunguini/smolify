@@ -96,3 +96,13 @@ func TestWideTerminalHeaderHoldsTheSongTools(t *testing.T) {
 		t.Fatal("narrow: the song tools crowd the actions row")
 	}
 }
+
+func TestTerminalSettingsRowsStayNarrow(t *testing.T) {
+	s := sampleApp().State
+	initAudioSettings(s)
+	s.page, s.focus = pageSettings, paneSettings
+	_, comp := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 200}), 200, 50)
+	if w := comp.Rects[setQuality].W; w > settingsColumns {
+		t.Fatalf("a setting is %d columns wide on a 200-column screen", w)
+	}
+}

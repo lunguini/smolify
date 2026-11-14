@@ -436,7 +436,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 	case pageSearch:
 		return virtualView(s, g, width, "Search", "Songs", nil)
 	case pageSettings:
-		return settingsView(s, g)
+		return settingsView(s, g, width)
 	}
 	pl, ok := s.selected()
 	if !ok {
