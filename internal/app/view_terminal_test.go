@@ -180,7 +180,7 @@ func TestTerminalTopBarStandsOnTheDivider(t *testing.T) {
 	d := barLines // the divider's line
 	if len(lines) < d+2 || strings.Count(lines[d], "┴") != 3 || []rune(lines[d])[termRailWidth] != '┼' ||
 		[]rune(lines[0])[termRailWidth] != '│' || []rune(lines[d+1])[termRailWidth] != '│' || strings.Contains(lines[0], "╭") ||
-		!strings.Contains(lines[d/2], "Settings") {
+		!strings.Contains(lines[d-2], "Settings") {
 		t.Fatalf("the keys do not share the borders:\n%s", strings.Join(lines[:d+2], "\n"))
 	}
 }

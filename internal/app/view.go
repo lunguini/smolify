@@ -387,7 +387,11 @@ func worded(b layout.Button, g bool, word string) layout.Button {
 // topBar sits in the window's title strip, right of its buttons: back
 // and forward, and the search field in the middle.
 // barLines is the terminal top bar's height above the divider under it.
-const barLines = 3
+const barLines = 4
+
+// historyColumns is a back or forward key's width: its side, then an odd
+// number of columns about twice the bar's height.
+const historyColumns = 1 + 2*barLines + 1
 
 // terminalTopBar is the top bar in a terminal: the logo and name over the
 // rail, then the history keys, the search field, and Settings. The bar
@@ -400,14 +404,14 @@ func terminalTopBar(s *State) layout.Node {
 	}
 	// key is one of the bar's keys: its left side, its content, and its
 	// stretch of the divider, from junction on.
-	// Keys are three lines tall, their content on the middle one: room
-	// from the terminal's top edge and from the divider, and a bigger
-	// target.
+	// Keys are four lines tall, their content on the third: room from the
+	// terminal's top edge (two lines, which its own edge crowds) and from
+	// the divider, and a bigger target.
 	key := func(id string, w layout.Size, junction string, content layout.Node) layout.Node {
 		return layout.Col{NodeBase: layout.NodeBase{ID: id, W: w, H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
 			layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(barLines)}, Children: []layout.Node{
 				keySide{color: searchBorder},
-				layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), PadTop: barLines / 2}, Children: []layout.Node{content}},
+				layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), PadTop: barLines - 2}, Children: []layout.Node{content}},
 			}},
 			newBarFill(layout.Grow(1), junction).withHeight(1),
 		}}
@@ -434,7 +438,7 @@ func terminalTopBar(s *State) layout.Node {
 		settings.Style.Fg = brand
 	}
 	brandMark := layout.Col{NodeBase: layout.NodeBase{ID: "brand", W: layout.Fixed(termRailWidth), H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
-		layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(barLines), PadLeft: 1, PadTop: barLines / 2, Gap: 1}, Children: []layout.Node{
+		layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(barLines), PadLeft: 1, PadTop: barLines - 2, Gap: 1}, Children: []layout.Node{
 			// The logo a line tall, square on screen, beside the name.
 			picture(s, false, layout.Image{NodeBase: layout.NodeBase{W: layout.Fixed(2), H: layout.Fixed(1)}, Source: logo(), Text: "♫", Fit: layout.ImageContain}),
 			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Fg: brand}},
@@ -443,8 +447,10 @@ func terminalTopBar(s *State) layout.Node {
 	}}
 	return layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
 		brandMark,
-		key(idBack, layout.Fixed(6), "┼", history("←", len(s.back) > 0)),
-		key(idForward, layout.Fixed(6), "┴", history("→", len(s.forward) > 0)),
+		// About square on screen (twice as many columns inside as lines),
+		// odd inside so the arrow centers.
+		key(idBack, layout.Fixed(historyColumns), "┼", history("←", len(s.back) > 0)),
+		key(idForward, layout.Fixed(historyColumns), "┴", history("→", len(s.forward) > 0)),
 		key(idSearchBox, layout.Grow(1), "┴", search),
 		key(idSettings, layout.Fixed(14), "┴", centered(settings)),
 	}}
