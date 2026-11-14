@@ -34,7 +34,7 @@ jobs:
       matrix:
         include:
           - { runner: macos-latest, goos: darwin, goarch: arm64 }
-          - { runner: macos-13, goos: darwin, goarch: amd64 }
+          - { runner: macos-15-intel, goos: darwin, goarch: amd64 }
           - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
           - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
           - { runner: windows-latest, goos: windows, goarch: amd64 }
@@ -69,7 +69,6 @@ jobs:
             mingw-w64-x86_64-libvorbis
             mingw-w64-x86_64-flac
             mingw-w64-x86_64-mpg123
-            mingw-w64-x86_64-ntldd
 
       - name: Build
         env:
@@ -81,7 +80,7 @@ jobs:
           case "${{ matrix.goos }}" in
             darwin) otool -L dist/smolify ;;
             linux) ldd dist/smolify ;;
-            windows) ntldd -R dist/smolify.exe ;;
+            windows) objdump -p dist/smolify.exe | grep 'DLL Name' ;;
           esac
 
       - name: Smoke test

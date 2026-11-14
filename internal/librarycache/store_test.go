@@ -21,7 +21,7 @@ func TestStoreRoundTripAccountIsolationAndPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.Load("alice")
-	if err != nil || got.Playlists[0].Name != "A" || got.Listings["spotify:user:alice:collection"].Tracks[0].AddedAt != data.Listings["spotify:user:alice:collection"].Tracks[0].AddedAt {
+	if err != nil || got.Playlists[0].Name != "A" || !got.Listings["spotify:user:alice:collection"].Tracks[0].AddedAt.Equal(data.Listings["spotify:user:alice:collection"].Tracks[0].AddedAt) {
 		t.Fatalf("load snapshot=%+v err=%v", got, err)
 	}
 	if _, err := s.Load("bob"); !os.IsNotExist(err) {
