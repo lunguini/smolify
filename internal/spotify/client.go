@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 // Package spotify implements search using Spotify's desktop search service.
 // Requests use the embedded player's access and client tokens.
 package spotify
@@ -14,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lunguini/smolify/internal/catalog"
 )
 
 // BaseURL is the desktop query service.
@@ -56,6 +60,9 @@ func (e Error) Error() string {
 	}
 	return fmt.Sprintf("Spotify: HTTP %d", e.Status)
 }
+
+func (e Error) HTTPStatus() int         { return e.Status }
+func (e Error) RetryAfterValue() string { return e.RetryAfter }
 
 func (c *Client) now() time.Time {
 	if c.Now != nil {
@@ -211,12 +218,7 @@ func (c *Client) postWith(ctx context.Context, fresh bool, body []byte, out any,
 }
 
 // Results are what a search found.
-type Results struct {
-	Tracks    []Track
-	Albums    []Album
-	Artists   []Artist
-	Playlists []Playlist
-}
+type Results = catalog.Results
 
 // Reset forgets account-specific authentication and rate limits. A token
 // request already in flight cannot repopulate the cache after this call.

@@ -1,8 +1,11 @@
+//go:build !js || !wasm
+
 package app
 
 import (
 	"context"
 	"errors"
+	"image"
 	"strings"
 	"testing"
 	"time"
@@ -152,5 +155,34 @@ func TestSettingsDropdownClickAwayReturnsPlaybackFocus(t *testing.T) {
 	d.Settle()
 	if strings.Join(f.calls, ",") != "playpause" {
 		t.Fatalf("Space didn't reach player: %v", f.calls)
+	}
+}
+
+func TestTerminalHomeCardOpensFromItsPicture(t *testing.T) {
+	d, f := ready(t)
+	s := d.State()
+	s.web = &catalogFake{fake: f, feed: spotify.HomeFeed{Sections: []spotify.HomeSection{
+		{Title: "Made for you", Items: []spotify.HomeItem{{URI: "spotify:album:a", Name: "A", Kind: "album", Image: "u"}}},
+	}}, album: spotify.AlbumDetails{Album: spotify.Album{URI: "spotify:album:a", Name: "A"}, Total: 1, Tracks: []spotify.Track{{URI: "spotify:track:a", Name: "First", DurationMS: 1000}}}}
+	s.username = "test-user"
+	d.Send(flatte.MenuEvent{ID: cmdHome})
+	d.Settle()
+	s.covers["u"] = image.NewRGBA(image.Rect(0, 0, 64, 64))
+	d.Resize(140, 40)
+	d.Settle()
+	_, comp := flatte.ComposeFrame(d.Frame(), 140, 40)
+	card, ok := comp.Rects[homeCardID(0)]
+	if !ok {
+		t.Fatal("no Home card")
+	}
+	x, y := card.X+card.W/2, card.Y+2 // on the cover
+	if id, _ := comp.HitTest(x, y); id != homeCardID(0) {
+		t.Fatalf("the cover hits %q, not its card", id)
+	}
+	d.Send(flatte.MouseEvent{X: x, Y: y, Button: flatte.MouseLeft, Action: flatte.MousePress})
+	d.Send(flatte.MouseEvent{X: x, Y: y, Button: flatte.MouseLeft, Action: flatte.MouseRelease})
+	d.Settle()
+	if s.page != pageBrowse || s.shown != "spotify:album:a" {
+		t.Fatalf("clicking the cover: page %v shown %q", s.page, s.shown)
 	}
 }

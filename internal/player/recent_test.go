@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 package player
 
 import (
@@ -28,7 +30,7 @@ func TestParseRecent(t *testing.T) {
 
 func TestAudioBitrate(t *testing.T) {
 	for in, want := range map[int]int{0: 320, 96: 96, 160: 160, 320: 320, 128: 320} {
-		if got := (Audio{Bitrate: in}).bitrate(); got != want {
+		if got := audioBitrate(Audio{Bitrate: in}); got != want {
 			t.Errorf("bitrate %d → %d, want %d", in, got, want)
 		}
 	}

@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 // Command spike-player embeds go-librespot without a UI: it signs in with
 // Spotify's device pairing, lists the library's playlists, plays the first
 // one, prints the player's events, and pauses after a while. It proves the
@@ -77,7 +79,7 @@ func main() {
 	// Requests fail until the session is up (after pairing): retry.
 	var playlists daemon.ApiLibraryPlaylists
 	for {
-		data, err := request(ctx, server, daemon.ApiRequestTypeLibraryPlaylists, daemon.ApiRequestDataLibraryPlaylists{Limit: 10})
+		data, err := request(ctx, server, daemon.ApiRequestTypeLibraryPlaylists, daemon.ApiRequestDataLibraryPage{Limit: 10})
 		if err == nil {
 			playlists = *data.(*daemon.ApiLibraryPlaylists)
 			break

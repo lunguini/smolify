@@ -1,9 +1,9 @@
+//go:build !js || !wasm
+
 // Package librarycache stores complete account library snapshots on disk.
 package librarycache
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,23 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
-
-const version = 1
-
-// Snapshot contains only complete remote listings. Incomplete player metadata
-// enumerations are deliberately excluded by the app before Save.
-type Snapshot struct {
-	Playlists []player.Playlist         `json:"playlists"`
-	Listings  map[string]player.Listing `json:"listings"`
-}
-
-type document struct {
-	Version int      `json:"version"`
-	Account string   `json:"account"`
-	Data    Snapshot `json:"data"`
-}
 
 // Store serializes writes and fences writes queued before Purge.
 type Store struct {
@@ -50,11 +35,6 @@ func New(dir string) *Store {
 	}
 }
 
-func accountKey(account string) string {
-	h := sha256.Sum256([]byte(account))
-	return hex.EncodeToString(h[:])
-}
-
 func (s *Store) path(account string) string { return filepath.Join(s.dir, accountKey(account)+".json") }
 
 func (s *Store) Load(account string) (Snapshot, error) {
@@ -66,10 +46,13 @@ func (s *Store) Load(account string) (Snapshot, error) {
 	pending := s.pendingPurge[account]
 	s.stateMu.Unlock()
 	if pending {
-		return out, os.ErrNotExist
+		return out, ErrNotExist
 	}
 	b, err := os.ReadFile(s.path(account))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return out, ErrNotExist
+		}
 		return out, err
 	}
 	var d document
@@ -80,7 +63,7 @@ func (s *Store) Load(account string) (Snapshot, error) {
 		return out, errors.New("library cache: incompatible snapshot")
 	}
 	if d.Data.Listings == nil {
-		d.Data.Listings = map[string]player.Listing{}
+		d.Data.Listings = map[string]model.Listing{}
 	}
 	return d.Data, nil
 }

@@ -1,31 +1,32 @@
-                                   ‹    ›   ⌕   What do you want to play?                       ⚙
+                                        │       │       │                             │
+ ▀▀ Smolify                             │   ❮   │   ❯   │ ⌕  What do you want to play │  ⚙ Settings
+                                        │       │       │                             │
+────────────────────────────────────────┼───────┴───────┴─────────────────────────────┴─────────────
+                                        │                    Playlist
+   ⌂ Home                               │
+                                        │                    bass house
+────────────────────────────────────────┤                    adrian · 3 songs · 1 h 7 min
+                                        │
+   ⌕ Search                             │                    ╭─────╮ ╭─────────────╮
+                                        │                    │  ▶  │ │  ⇄ Shuffle  │
+────────────────────────────────────────┤                    ╰─────╯ ╰─────────────╯
+                                        │                           ╭────────╮ ╭──────────────────╮
+ Your Library                         2 │                           │ ⌕  ty  │ │  ⇅ Position ↑ ▾  │
+                                        │                           ╰────────╯ ╰──────────────────╯
+ ╭──────────────────────────────────╮   │
+ │  ♫  bass house                   │   │    #        Title               Album                ◷ 
+ │     Playlist · adrian            │   │ ─────────────────────────────────────────────────────────
+ ╰──────────────────────────────────╯   │ ╭─────────────────────────────────────────────────────╮
+  ▀▀▀▀ Car Music                        │ │  2  ▀▀▀▀  Gravity            Fall         ♡    3:05 │
+  ▀▀▀▀ Playlist · adrian                │ │     ▀▀▀▀  Dua                                       │
+                                        │
+                                        │
+                                        │
+                                        │
+────────────────────────────────────────┴───────────────────────────────────────────────────────────
 
-   Smolify                          ╭──────╮   Playlist                                            
-                                    │  ♫   │   bass house                                          
-                                    │      │   adrian · 3 songs · 1 h 7 min                        
-   ⌂  Home                          ╰──────╯   [▶]   ⇄                                             
-   ⌕  Search                                                                                       
-                                                               ⌕  Gravity         [ Position ↑ ▾ ] 
-                                                                                                   
-                                      #        Title                   Album                  ◷    
-  Your Library                 2   ─────────────────────────────────────────────────────────────── 
-                                      2    ♫   Gravity                Fall                3:05     
-     ♫  bass house                             Dua                                                 
-        Playlist · adrian                                                                          
-     ♫  Car Music                                                                                  
-        Playlist · adrian                                                                          
-                                                                                                   
-                                                                                                   
-                                                                                                   
-                                                                                                   
-                                                                                                   
-                                                                                                   
-                                                                                                   
-                                                                                                   
-                                                                                                   
-
-        Nothing playing            0:00 ●─────────────────────────────── 0:00   ≡ 🔈 ━━━━━●────────
-    ♫   Pick a playlist and pres…            ⇄    ⏮   [▶]   ⏭    ↻ 
-       
-[cursor 73,7]
+ ▀▀▀▀▀▀ Nothing playing                    0:00 ●─────────────────────── 0:00   ≡ 🔈 ━━━━━●────────
+ ▀▀▀▀▀▀ Pick a playlist and press space          ⇄    ⏮   [▶]   ⏭    ↻ 
+ ▀▀▀▀▀▀
+[cursor 75,13]
 [title Smolify]

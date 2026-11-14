@@ -3,19 +3,18 @@ package app
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/smolify/internal/librarycache"
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 const regularListingTrackCap = 2000
 
 // cacheableListing rejects regular player listings whose completeness is
 // ambiguous because the backend caps enumeration at 2,000 tracks.
-func cacheableListing(s *State, uri string, listing player.Listing) bool {
+func cacheableListing(s *State, uri string, listing model.Listing) bool {
 	if !listing.Complete() || listing.Length < 0 || listing.Cached < 0 || len(listing.Tracks) != listing.Length {
 		return false
 	}
@@ -39,7 +38,12 @@ func cacheableListing(s *State, uri string, listing player.Listing) bool {
 // WithCache enables a persistent library cache rooted in dir. The cache is
 // keyed by the signed-in Spotify username/account identifier.
 func WithCache(app flatte.App[State], dir string) flatte.App[State] {
-	app.State.cache = librarycache.New(dir)
+	return WithCacheStore(app, librarycache.New(dir))
+}
+
+// WithCacheStore installs a host-provided library cache.
+func WithCacheStore(app flatte.App[State], store librarycache.Cache) flatte.App[State] {
+	app.State.cache = store
 	return app
 }
 
@@ -60,7 +64,7 @@ func hydrateCache(s *State, account string) {
 		}
 		s.cacheLoading = false
 		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
+			if !errors.Is(err, librarycache.ErrNotExist) {
 				// Corrupt cache is ignored and replaced only after a successful
 				// library read has supplied safe current data.
 				s.logf("library cache %s: %v", account, err)
@@ -85,7 +89,7 @@ func applyCacheSnapshot(s *State, account string, snapshot librarycache.Snapshot
 		if _, alreadyLoaded := s.listings[uri]; !alreadyLoaded && listing.URI == uri && cacheableListing(s, uri, listing) {
 			s.listings[uri] = listing
 			s.stale[uri] = true // always refresh on startup, even at equal counts
-			if uri == player.LikedSongs(account) {
+			if uri == model.LikedSongs(account) {
 				for _, t := range listing.Tracks {
 					if t.URI != "" {
 						if _, known := s.liked[t.URI]; known {
@@ -110,10 +114,10 @@ func saveCache(s *State) {
 	account, cache, generation := s.username, s.cache, s.cacheEpoch
 	revision := s.cacheRevision[account] + 1
 	s.cacheRevision[account] = revision
-	snapshot := librarycache.Snapshot{Playlists: append([]player.Playlist(nil), s.playlists...), Listings: map[string]player.Listing{}}
+	snapshot := librarycache.Snapshot{Playlists: append([]model.Playlist(nil), s.playlists...), Listings: map[string]model.Listing{}}
 	for uri, listing := range s.listings {
 		if cacheableListing(s, uri, listing) && !virtual(uri) {
-			listing.Tracks = append([]player.Track(nil), listing.Tracks...)
+			listing.Tracks = append([]model.Track(nil), listing.Tracks...)
 			snapshot.Listings[uri] = listing
 		}
 	}

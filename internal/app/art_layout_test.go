@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 package app
 
 import (
@@ -8,7 +10,7 @@ import (
 
 func TestFallbackThumbnailMusicNoteIsCentered(t *testing.T) {
 	for _, url := range []string{"", "https://not-loaded"} {
-		tile := cover(&State{}, url, 32)
+		tile := cover(&State{}, url, 32, true)
 		scene := layout.LayoutScene(tile, 32, 32, layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32})
 		found := false
 		for _, raw := range scene.Ops {

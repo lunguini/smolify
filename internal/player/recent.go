@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 package player
 
 import (
@@ -19,11 +21,6 @@ import (
 
 // Played is a list the user played lately: its URI, the track last played
 // in it, and when.
-type Played struct {
-	ContextURI, TrackURI string
-	At                   time.Time
-}
-
 // spclientHost answers Spotify's internal services for any account.
 const spclientHost = "spclient.wg.spotify.com"
 

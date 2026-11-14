@@ -1,26 +1,27 @@
 package app
 
 import (
+	"charm.land/lipgloss/v2"
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui"
 	"github.com/lunguini/flatte/flatui/layout"
 
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
-// Settings are what the Settings page changes, kept in settings.json next
-// to the player's state.
+// SettingsStore persists user preferences for the current host.
+type SettingsStore interface {
+	Save(Settings) error
+}
+
+// Settings are the user preferences changed on the Settings page. The host
+// persists them through SettingsStore.
 type Settings struct {
 	// NotifyErrors posts errors and confirmations as notifications (in a
 	// window, which shows them nowhere else).
@@ -35,7 +36,19 @@ type Settings struct {
 
 	DeviceName string `json:"device_name"`
 	Compact    bool   `json:"compact_rows"`
+
+	// Images is how a terminal shows covers: imagesPictures,
+	// imagesHalfBlocks, or imagesOff. A window always shows pictures.
+	Images int `json:"terminal_images"`
 }
+
+// The terminal image choices: real pictures where the terminal can show
+// them, colored half-block cells, or no images (covers are a ♫ tile).
+const (
+	imagesPictures = iota
+	imagesHalfBlocks
+	imagesOff
+)
 
 // DefaultSettings are a first launch's settings.
 func DefaultSettings() Settings {
@@ -43,82 +56,16 @@ func DefaultSettings() Settings {
 }
 
 // Audio is how the settings ask the player to play.
-func (st Settings) Audio() player.Audio {
-	return player.Audio{Bitrate: st.Bitrate, Normalise: st.Normalise, Crossfade: time.Duration(st.Crossfade) * time.Second, Autoplay: st.Autoplay}
+func (st Settings) Audio() model.Audio {
+	return model.Audio{Bitrate: st.Bitrate, Normalise: st.Normalise, Crossfade: time.Duration(st.Crossfade) * time.Second, Autoplay: st.Autoplay}
 }
 
-// SettingsPath is where settings live in dir (the player's state dir).
-func SettingsPath(dir string) string { return filepath.Join(dir, "settings.json") }
-
-// LoadSettings reads the settings at path: the defaults when there are
-// none yet, with any setting the file lacks at its default.
-func LoadSettings(path string) (Settings, error) {
-	st := DefaultSettings()
-	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return st, nil
-	}
-	if err != nil {
-		return st, err
-	}
-	if err := json.Unmarshal(b, &st); err != nil {
-		return DefaultSettings(), err
-	}
-	if strings.TrimSpace(st.DeviceName) == "" {
-		st.DeviceName = DefaultSettings().DeviceName
-	}
-	return st, nil
-}
-
-// saveSettings writes st to path atomically (0600).
-func saveSettings(path string, st Settings) error {
-	b, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".settings-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
-}
-
-// settingsWriter serializes disk writes and skips snapshots superseded
-// before their worker starts. Revisions are assigned on the app loop.
-type settingsWriter struct {
-	path   string
-	latest atomic.Uint64
-	mu     sync.Mutex
-}
-
-func (w *settingsWriter) prepare(st Settings) func() error {
-	revision := w.latest.Add(1)
-	return func() error {
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		if revision != w.latest.Load() {
-			return nil
-		}
-		return saveSettings(w.path, st)
-	}
-}
-
-// WithSettings is app with settings st, saved to path as they change
-// ("": not saved, as in tests).
-func WithSettings(app flatte.App[State], path string, st Settings) flatte.App[State] {
+// WithSettingsStore installs host storage and applies the loaded settings.
+func WithSettingsStore(app flatte.App[State], store SettingsStore, st Settings) flatte.App[State] {
 	s := app.State
-	s.settings, s.settingsPath, s.compact = st, path, st.Compact
+	s.settings, s.settingsStore, s.compact = st, store, st.Compact
 	s.activeAudio = st.Audio()
 	initAudioSettings(s)
-	s.settingsWriter = &settingsWriter{path: path}
 	s.deviceName = flatui.TextField{Value: st.DeviceName, Cursor: len(st.DeviceName)}
 	return app
 }
@@ -142,16 +89,32 @@ const (
 	setApplyAudio   = "set:apply-audio"
 	setDeviceName   = "set:device-name"
 	setCompact      = "set:compact"
+	setImages       = "set:images"
 	setSignOut      = "set:sign-out"
 )
 
 // settingIDs are the rows in page order.
-var settingIDs = []string{setNotifyErrors, setNotifyTracks, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setDeviceName, setCompact, setSignOut}
+var settingIDs = []string{setNotifyErrors, setNotifyTracks, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setDeviceName, setCompact, setImages, setSignOut}
+
+// settingRows are the rows s shows: a window has no terminal images.
+func settingRows(s *State) []string {
+	if !s.windowed {
+		return settingIDs
+	}
+	rows := make([]string, 0, len(settingIDs)-1)
+	for _, id := range settingIDs {
+		if id != setImages {
+			rows = append(rows, id)
+		}
+	}
+	return rows
+}
 
 // The choices of the two multi-way settings, in order.
 var (
 	qualities  = []choice{{"Low", 96}, {"Normal", 160}, {"High", 320}}
 	crossfades = []choice{{"Off", 0}, {"2 s", 2}, {"5 s", 5}, {"10 s", 10}}
+	imageModes = []choice{{"Pictures", imagesPictures}, {"Half-blocks", imagesHalfBlocks}, {"Off", imagesOff}}
 )
 
 type choice struct {
@@ -188,6 +151,8 @@ func changeSetting(s *State, id string, step int) {
 		st.Bitrate = qualities[wrap(pickOf(qualities, st.Bitrate)+step, len(qualities))].value
 	case setCrossfade:
 		st.Crossfade = crossfades[wrap(pickOf(crossfades, st.Crossfade)+step, len(crossfades))].value
+	case setImages:
+		st.Images = imageModes[wrap(pickOf(imageModes, st.Images)+step, len(imageModes))].value
 	case setApplyAudio:
 		applyAudioSettings(s)
 		return
@@ -195,7 +160,9 @@ func changeSetting(s *State, id string, step int) {
 		s.focus = paneDevice
 		return
 	case setSignOut:
-		confirmSignOut(s)
+		if supportsSignOut(s) {
+			confirmSignOut(s)
+		}
 		return
 	default:
 		return
@@ -211,6 +178,8 @@ func chooseSetting(s *State, id string, n int) {
 		st.Bitrate = qualities[n].value
 	case id == setCrossfade && n >= 0 && n < len(crossfades):
 		st.Crossfade = crossfades[n].value
+	case id == setImages && n >= 0 && n < len(imageModes):
+		st.Images = imageModes[n].value
 	default:
 		return
 	}
@@ -229,7 +198,7 @@ func applyAudioSettings(s *State) {
 	}, func(s *State, _ struct{}, err error) {
 		s.applyingAudio = false
 		if err != nil {
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, player.ErrSuperseded) {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, model.ErrSuperseded) {
 				fail(s, "Could not apply audio settings: "+err.Error())
 			}
 			return
@@ -240,6 +209,11 @@ func applyAudioSettings(s *State) {
 }
 
 func wrap(i, n int) int { return ((i % n) + n) % n }
+
+func supportsSignOut(s *State) bool {
+	capability, ok := s.be.(interface{ SupportsSignOut() bool })
+	return !ok || capability.SupportsSignOut()
+}
 
 // applySettings makes st the settings: saved, and passed on to whatever
 // they control. Audio options are startup-only in go-librespot, so they are
@@ -253,13 +227,9 @@ func applySettings(s *State, st Settings) {
 		name := st.DeviceName
 		sendLatest(s, "rename-device", func(ctx context.Context, be Backend) error { return be.SetDeviceName(ctx, name) })
 	}
-	if path := s.settingsPath; path != "" {
-		if s.settingsWriter == nil {
-			s.settingsWriter = &settingsWriter{path: path}
-		}
-		save := s.settingsWriter.prepare(st)
+	if store := s.settingsStore; store != nil {
 		flatte.Go(s.fx, "save-settings", func(context.Context) (struct{}, error) {
-			return struct{}{}, save()
+			return struct{}{}, store.Save(st)
 		}, func(s *State, _ struct{}, err error) {
 			if err != nil {
 				fail(s, "Could not save the settings: "+err.Error())
@@ -270,12 +240,15 @@ func applySettings(s *State, st Settings) {
 
 // confirmSignOut asks before forgetting the sign-in.
 func confirmSignOut(s *State) {
+	if !supportsSignOut(s) {
+		return
+	}
 	flatte.Alert(s.fx, "sign-out", flatte.AlertDialog{
 		Title:   "Sign out of Spotify?",
 		Message: "Smolify forgets this device's sign-in and asks you to pair it again.",
 		Buttons: []string{"Sign Out", "Cancel"},
-	}, func(s *State, button int) {
-		if button != 0 {
+	}, func(s *State, button int, err error) {
+		if err != nil || button != 0 {
 			return
 		}
 		resetAccount(s)
@@ -294,13 +267,18 @@ func openSettings(s *State) {
 // settingsKey moves through the settings and changes them: ↑/↓ pick a row,
 // Space/Enter flip or step it, ←/→ step a choice, Esc goes back.
 func settingsKey(s *State, k flatte.KeyEvent) bool {
-	i := max(s.settingCursor, 0)
+	settingIDs := settingRows(s)
+	i := min(max(s.settingCursor, 0), len(settingIDs)-1)
 	switch k.Key {
 	case flatte.KeyLeft, flatte.KeyRight, flatte.KeyEnter:
 		if settingsChoiceKey(s, settingIDs[i], k.Key) {
 			return true
 		}
-		changeSetting(s, settingIDs[i], 1)
+		step := 1
+		if k.Key == flatte.KeyLeft {
+			step = -1
+		}
+		changeSetting(s, settingIDs[i], step)
 	case flatte.KeyUp, flatte.KeyDown:
 		if settingsChoiceKey(s, settingIDs[i], k.Key) {
 			return true
@@ -407,8 +385,9 @@ func deviceKey(s *State, k flatte.KeyEvent, fx flatte.Effects[State]) {
 
 // settingsView is the Settings page: sections of rows, each a name and a
 // line about it on the left and its control on the right.
-func settingsView(s *State, g bool) layout.Node {
+func settingsView(s *State, g bool, width int) layout.Node {
 	st := s.settings
+	settingIDs := settingRows(s)
 	cursor := ""
 	if s.focus == paneSettings && s.settingCursor >= 0 && s.settingCursor < len(settingIDs) {
 		cursor = settingIDs[s.settingCursor]
@@ -421,6 +400,9 @@ func settingsView(s *State, g bool) layout.Node {
 		if g {
 			r.PadTop, r.PadBottom = 0, 0
 			r.H = layout.Points(48)
+		} else {
+			// A faint rule under each setting, so a control pairs with its name.
+			return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{r, settingsRule{}}}
 		}
 		return r
 	}
@@ -431,7 +413,11 @@ func settingsView(s *State, g bool) layout.Node {
 	name.Clearable = true
 	name.W = layout.Fixed(24)
 	section := func(title string) layout.Node {
-		return layout.Col{NodeBase: layout.NodeBase{PadTop: 2, PadBottom: 1, PadLeft: 1}, Children: []layout.Node{layout.Label{Text: title, Style: caption}}}
+		heading := layout.Node(layout.Label{Text: title, Style: caption})
+		if !g { // the heading leads a rule across the section
+			heading = layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: 1}, Children: []layout.Node{heading, newHRule(nil)}}
+		}
+		return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), PadTop: pick(g, 2, 1), PadBottom: 1, PadLeft: 1}, Children: []layout.Node{heading}}
 	}
 	applyLabel := "Apply now"
 	if s.applyingAudio {
@@ -455,11 +441,38 @@ func settingsView(s *State, g bool) layout.Node {
 		section("DEVICE AND ACCOUNT"),
 		row(setDeviceName, "Device name", "How Smolify shows in Spotify Connect (Enter to keep)", name),
 		row(setCompact, "Compact rows", "One line per song", toggle(setCompact, st.Compact)),
-		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Fg: danger}}),
 	}
+	if !g {
+		modes := layout.Row{NodeBase: layout.NodeBase{Gap: 1}}
+		for n, m := range imageModes {
+			b := layout.Button{NodeBase: layout.NodeBase{ID: setImages + ":" + strconv.Itoa(n)}, Label: m.label, Plain: m.value != st.Images, Style: subtle}
+			if m.value == st.Images {
+				b.Style = layout.TextStyle{Fg: brand, Bold: true}
+			}
+			modes.Children = append(modes.Children, b)
+		}
+		body = append(body, row(setImages, "Images", "Covers as pictures (where the terminal can), colored blocks, or none", modes))
+	}
+	body = append(body,
+		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Fg: danger}, Disabled: !supportsSignOut(s)}),
+	)
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Grow(1), Pad: pick(g, 2, 1)}, Children: []layout.Node{
-		layout.Scroll{NodeBase: layout.NodeBase{ID: idSettingsScroll, W: layout.Grow(1), H: layout.Grow(1)}, OffsetY: s.settingsScroll, Child: layout.Col{NodeBase: layout.NodeBase{ID: idSettingsContent, W: layout.Grow(1)}, Children: body}},
+		layout.Scroll{NodeBase: layout.NodeBase{ID: idSettingsScroll, W: layout.Grow(1), H: layout.Grow(1)}, OffsetY: s.settingsScroll, Child: layout.Col{NodeBase: layout.NodeBase{ID: idSettingsContent, W: settingsWidth(g, width)}, Children: body}},
 	}}
+}
+
+// settingsColumns is the widest a terminal's settings rows get: across a
+// wide pane, a control far from its name is hard to pair with it.
+const settingsColumns = 80
+
+// settingsWidth is the settings rows' width: a window's pane, or up to
+// settingsColumns of a terminal's (its center pane less the rail, its
+// divider, and padding).
+func settingsWidth(g bool, width int) layout.Size {
+	if g || width <= 0 {
+		return layout.Grow(1)
+	}
+	return layout.Fixed(max(min(settingsColumns, width-termRailWidth-3), 20))
 }
 
 // clampSettings bounds the page's scroll by its content, as last laid out
@@ -478,6 +491,10 @@ func clampSettings(s *State) {
 func revealSetting(s *State) {
 	view, okV := s.settingRects[idSettingsScroll]
 	content, okC := s.settingRects[idSettingsContent]
+	settingIDs := settingRows(s)
+	if s.settingCursor < 0 || s.settingCursor >= len(settingIDs) {
+		return
+	}
 	row, okR := s.settingRects[settingIDs[s.settingCursor]]
 	if !okV || !okC || !okR {
 		return
@@ -510,7 +527,7 @@ func settingClicked(s *State, target string) bool {
 		selectChoice = &s.settingCrossfade
 	}
 	if selectChoice != nil && selectChoice.Click(target, id+":select") {
-		for i, sid := range settingIDs {
+		for i, sid := range settingRows(s) {
 			if sid == id {
 				s.settingCursor = i
 			}
@@ -523,7 +540,7 @@ func settingClicked(s *State, target string) bool {
 	}
 	s.settingQuality.Close()
 	s.settingCrossfade.Close()
-	for i, sid := range settingIDs {
+	for i, sid := range settingRows(s) {
 		if sid == id {
 			s.settingCursor = i
 		}
@@ -543,3 +560,15 @@ func settingClicked(s *State, target string) bool {
 	}
 	return true
 }
+
+// settingsRule is the faint line under a setting in a terminal.
+type settingsRule struct{ layout.NodeBase }
+
+func (settingsRule) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
+
+func (settingsRule) Render(r layout.Rect) string {
+	return lipgloss.NewStyle().Foreground(settingsRuleColor).Render(" " + strings.Repeat("┄", max(r.W-2, 0)) + " ")
+}
+
+// settingsRuleColor is fainter than the dividers: it groups, not splits.
+var settingsRuleColor = lipgloss.Color("#2c2c2c")

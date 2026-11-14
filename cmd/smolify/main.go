@@ -1,6 +1,8 @@
+//go:build !js || !wasm
+
 // Command smolify is a small, fast Spotify client: in the terminal, or in a
-// native window with -gui. It plays through the Mac's audio output (Spotify
-// Premium required).
+// native window with -gui on supported platforms. It plays through the Mac's
+// audio output (Spotify Premium required).
 package main
 
 import (
@@ -16,18 +18,24 @@ import (
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/window"
+	"github.com/lunguini/flatte/window/media"
 
 	"github.com/lunguini/smolify/internal/app"
+	"github.com/lunguini/smolify/internal/demo"
 	"github.com/lunguini/smolify/internal/librarycache"
 	"github.com/lunguini/smolify/internal/player"
 	"github.com/lunguini/smolify/internal/spotify"
 )
 
 func main() {
-	gui := flag.Bool("gui", false, "run in a native window instead of the terminal")
+	gui := false
+	if window.Supported() {
+		flag.BoolVar(&gui, "gui", false, "run in a native window instead of the terminal")
+	}
 	signOut := flag.Bool("sign-out", false, "forget the stored Spotify sign-in and exit")
 	debugLog := flag.String("debug-log", "", "log player events, commands, requests, and memory to this file")
 	heapProfile := flag.String("heap-profile", "", "write a heap profile to this file on exit")
+	demoMode := flag.Bool("demo", false, "run with sample data and simulated playback, without signing in")
 	flag.Parse()
 
 	dir, err := os.UserConfigDir()
@@ -52,6 +60,18 @@ func main() {
 	}
 
 	ctx := context.Background()
+	if *demoMode {
+		backend := demo.New()
+		go backend.Run(ctx)
+		a := app.New(backend, backend, backend, nil)
+		if gui {
+			a = app.Windowed(a)
+		}
+		if err := flatte.Run(ctx, a, runOptions(gui)...); err != nil {
+			fail(err)
+		}
+		return
+	}
 	settingsPath := app.SettingsPath(dir)
 	settings, err := app.LoadSettings(settingsPath)
 	if err != nil {
@@ -78,16 +98,27 @@ func main() {
 	}
 	web := &spotify.Client{Token: p.Token, ClientToken: p.ClientToken}
 	a := app.WithCache(app.WithSettings(app.New(p, app.HTTPImages{}, web, debug), settingsPath, settings), cacheDir)
-	if *gui {
+	if gui {
 		a = app.Windowed(a)
-		theme := app.WindowTheme()
-		err = window.Run(ctx, a, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
-	} else {
-		err = window.RunTerminal(ctx, a, flatte.WithMouse(flatte.MouseModeCellMotion), flatte.WithoutDefaultQuit(), flatte.WithReportFocus())
 	}
+	err = flatte.Run(ctx, a, runOptions(gui)...)
 	if err != nil {
 		fail(err)
 	}
+}
+
+// runOptions returns the run options shared by the signed-in and demo modes.
+func runOptions(gui bool) []flatte.Option {
+	options := []flatte.Option{
+		flatte.WithMouse(flatte.MouseModeCellMotion),
+		flatte.WithoutDefaultQuit(),
+		flatte.WithReportFocus(),
+	}
+	if gui {
+		theme := app.WindowTheme()
+		return append(options, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
+	}
+	return append(options, media.Controls{})
 }
 
 // logMemory writes the Go runtime's memory figures to w every 10 seconds:

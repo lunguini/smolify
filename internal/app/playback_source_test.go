@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 package app
 
 import (
@@ -35,7 +37,7 @@ func TestPlaybackSourceReturnsToPlayingPlaylistWithoutPlaying(t *testing.T) {
 			t.Fatalf("Source return restarted playback: %v", f.calls)
 		}
 	}
-	scene := layout.LayoutScene(playerBar(s, true), 1100, 120, linkMetrics)
+	scene := layout.LayoutScene(playerBar(s, true, 0), 1100, 120, linkMetrics)
 	button, volume := scene.Rects[idPlaybackSource], scene.Rects[idVolume]
 	if button.W == 0 || button.X+button.W > volume.X {
 		t.Fatalf("Source button is not beside volume: %+v %+v", button, volume)

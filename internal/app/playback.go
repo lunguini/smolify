@@ -7,13 +7,13 @@ import (
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui"
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 // playIntent is the requested next track, separate from confirmed player
 // metadata. An API acknowledgement does not mean audio has started.
 type playIntent struct {
-	track             player.Track
+	track             model.Track
 	contextURI, shown string
 	spinner           flatui.Spinner
 	scope             *flatte.Scope
@@ -32,7 +32,7 @@ func loadingIndicator(s *State) string {
 func loadingPlaylist(s *State, uri string) bool {
 	return s.pending != nil && (s.pending.contextURI == uri || s.pending.shown == uri)
 }
-func pendingTrack(s *State, t player.Track, shown string) bool {
+func pendingTrack(s *State, t model.Track, shown string) bool {
 	p := s.pending
 	return p != nil && t.URI != "" && t.URI == p.track.URI && (shown == p.shown || shown == p.contextURI || virtual(shown))
 }
@@ -50,7 +50,7 @@ func clearPendingPlay(s *State) {
 	flatte.Cancel(s.fx, "play")
 }
 
-func requestPlay(s *State, uri, skip string, track player.Track) {
+func requestPlay(s *State, uri, skip string, track model.Track) {
 	if p := s.pending; p != nil && p.contextURI == uri && p.track.URI == track.URI {
 		return
 	}
@@ -89,7 +89,7 @@ func requestPlay(s *State, uri, skip string, track player.Track) {
 		s.logf("request play: err=%v", err)
 		if err != nil {
 			clearPendingPlay(s)
-			if !errors.Is(err, player.ErrSuperseded) && !errors.Is(err, context.Canceled) {
+			if !errors.Is(err, model.ErrSuperseded) && !errors.Is(err, context.Canceled) {
 				fail(s, "Could not play: "+err.Error())
 			}
 		}
@@ -112,7 +112,7 @@ func pendingMatches(s *State, uri, contextURI string) bool {
 
 // confirmPendingPlay runs only for a matching actual Playing event. When
 // metadata has not arrived yet, the requested row supplies its known data.
-func confirmPendingPlay(s *State, e player.Playing) {
+func confirmPendingPlay(s *State, e model.Playing) {
 	if !pendingMatches(s, e.URI, e.ContextURI) {
 		return
 	}
@@ -136,7 +136,7 @@ func bindPendingPlay(s *State, uri, contextURI string) {
 		return
 	}
 	if p.track.URI != uri {
-		p.track = player.Track{URI: uri, ContextURI: contextURI}
+		p.track = model.Track{URI: uri, ContextURI: contextURI}
 	}
 	p.track.URI, p.track.ContextURI = uri, contextURI
 	origin := s.listings[p.shown].Tracks
@@ -150,7 +150,7 @@ func bindPendingPlay(s *State, uri, contextURI string) {
 	}
 }
 
-func enrichPendingPlay(s *State, t player.Track) {
+func enrichPendingPlay(s *State, t model.Track) {
 	if p := s.pending; p != nil && t.URI != "" && t.URI == p.track.URI {
 		if t.ContextURI != "" && t.ContextURI != p.contextURI {
 			return

@@ -2,11 +2,12 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui"
 	"github.com/lunguini/flatte/flatui/layout"
-	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/model"
 )
 
 const (
@@ -22,16 +23,26 @@ func filterView(s *State, g bool) layout.Node {
 		size := layout.NodeBase{ID: idTrackFilterToggle, Tooltip: "Find in playlist (⌘⇧F)", W: layout.Fixed(3), H: layout.Fixed(1)}
 		if g {
 			size.W, size.H = layout.Auto(), layout.Auto()
+			return layout.Button{NodeBase: size, Icon: layout.IconSearch, Label: "⌕", Plain: true}
 		}
-		return layout.Button{NodeBase: size, Icon: layout.IconSearch, Label: "⌕", Plain: true}
+		// A terminal frames it as the search field is.
+		size.W, size.H, size.PadLeft, size.PadRight = layout.Auto(), layout.Fixed(3), 1, 1
+		size.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+		return layout.Button{NodeBase: size, Label: "⌕ Find", Plain: true}
 	}
 	field := s.trackFilter.Layout(idTrackFilter, focused)
 	field.Clearable = true
 	field.Placeholder = "Filter songs"
 	field.W = layout.Grow(1)
 	icon := layout.Icon{NodeBase: layout.NodeBase{W: layout.Fixed(2)}, Name: layout.IconSearch, Text: "⌕ ", Style: subtle}
-	base := layout.NodeBase{ID: idTrackFilterBox, W: layout.Fixed(18), H: layout.Fixed(1), Gap: 1}
+	base := layout.NodeBase{ID: idTrackFilterBox, W: layout.Fixed(filterWidth(s)), H: layout.Fixed(3), Gap: 1, PadLeft: 1, PadRight: 1,
+		Box: layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}}
+	if focused {
+		base.Box.BorderColor = brand
+	}
+	icon.H = layout.Fixed(1)
 	if g {
+		base.Box, base.PadLeft, base.PadRight = layout.Box{}, 0, 0
 		icon.W, icon.H = layout.Points(18), layout.Points(18)
 		base.W, base.H = layout.Points(180), layout.Auto()
 	}
@@ -39,9 +50,54 @@ func filterView(s *State, g bool) layout.Node {
 }
 
 func openTrackFilter(s *State) {
+	opening := !s.trackFilterOpen
 	s.trackFilterOpen = true
 	s.focus = paneTrackFilter
 	s.trackSort.Close()
+	if opening && !s.windowed {
+		growFilter(s)
+	}
+}
+
+// The terminal's Find key opens into the filter field by growing to the
+// field's width over a few frames, rather than jumping.
+const (
+	findColumns   = 10 // the Find key, framed
+	filterColumns = 26 // the open field, framed
+	filterSteps   = 6
+	filterStep    = 25 * time.Millisecond
+)
+
+// growFilter animates the field open: filterGrow counts its frames up to
+// filterSteps, then the timer stops.
+func growFilter(s *State) {
+	if s.filterScope != nil {
+		s.filterScope.Cancel()
+	}
+	s.filterGrow = 0
+	scope := flatte.NewScope(s.fx, "filter-grow")
+	s.filterScope = scope
+	_ = flatte.ScopeEvery(scope, s.fx, filterStep, func(s *State, _ time.Time) {
+		s.filterGrow++
+		if s.filterGrow >= filterSteps {
+			s.filterGrow = filterSteps
+			scope.Cancel()
+			if s.filterScope == scope {
+				s.filterScope = nil
+			}
+		}
+	})
+}
+
+// filterWidth is the open field's width at the current frame, easing out
+// (fast, then settling) from the Find key's width.
+func filterWidth(s *State) int {
+	if s.filterScope == nil {
+		return filterColumns
+	}
+	t := float64(s.filterGrow) / filterSteps
+	t = 1 - (1-t)*(1-t)
+	return findColumns + int(float64(filterColumns-findColumns)*t+0.5)
 }
 
 func blurTrackFilter(s *State) {
@@ -59,12 +115,12 @@ func collapseEmptyTrackFilter(s *State) {
 	}
 }
 
-func filterTracks(s *State, l player.Listing) player.Listing {
+func filterTracks(s *State, l model.Listing) model.Listing {
 	query := strings.ToLower(strings.TrimSpace(s.trackFilter.Value))
 	if query == "" || virtual(l.URI) {
 		return l
 	}
-	tracks := make([]player.Track, 0, len(l.Tracks))
+	tracks := make([]model.Track, 0, len(l.Tracks))
 	for _, track := range l.Tracks {
 		if strings.Contains(strings.ToLower(track.Name), query) || strings.Contains(strings.ToLower(strings.Join(track.Artists, ", ")), query) || strings.Contains(strings.ToLower(track.Album), query) {
 			tracks = append(tracks, track)

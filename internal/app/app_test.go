@@ -1,3 +1,5 @@
+//go:build !js || !wasm
+
 package app
 
 import (
@@ -186,8 +188,54 @@ func ready(t *testing.T) (*flatest.Driver[State], *fake) {
 	return d, f
 }
 
+func focusLibrary(t *testing.T, d *flatest.Driver[State]) {
+	t.Helper()
+	for _, want := range []pane{paneTrackFilter, paneSort, paneLibrary} {
+		d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
+		if d.State().focus != want {
+			t.Fatalf("Tab focus %v, want %v", d.State().focus, want)
+		}
+	}
+}
+
+type noRadioFake struct{ *fake }
+
+func (noRadioFake) SupportsRadio() bool { return false }
+
+type noSignOutFake struct{ *fake }
+
+func (noSignOutFake) SupportsSignOut() bool { return false }
+
+func TestSongRadioMenuFollowsBackendSupport(t *testing.T) {
+	d, f := ready(t)
+	s := d.State()
+	s.be = noRadioFake{f}
+	s.shown = bassHouse.URI
+	s.listings[bassHouse.URI] = bassHouse
+	var radio flatte.MenuItem
+	for _, item := range ContextMenu(s, idTracks+":0") {
+		if item.ID == "song-radio" {
+			radio = item
+			break
+		}
+	}
+	if radio.ID == "" || !radio.Disabled {
+		t.Fatalf("radio menu item = %+v", radio)
+	}
+}
+
+func TestSignOutRequiresAccountSupport(t *testing.T) {
+	if supportsSignOut(&State{be: noSignOutFake{&fake{}}}) {
+		t.Fatal("sign out enabled for a backend without an account")
+	}
+	if !supportsSignOut(&State{be: &fake{}}) {
+		t.Fatal("native fake lost default sign-out behavior")
+	}
+}
+
 func TestBrowseAndPlay(t *testing.T) {
 	d, f := ready(t)
+	focusLibrary(t, d)
 	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
 	fr := d.Frame()
 	if !strings.Contains(plain(fr), "Car Music") || !strings.Contains(plain(fr), "For the road.") || !strings.Contains(plain(fr), "adrian · 7 songs") {
@@ -428,7 +476,6 @@ func TestTrackTablePlaysFromATrack(t *testing.T) {
 	if !strings.Contains(strings.Join(f.reads, ","), "liked spotify:track:1,spotify:track:2") || strings.Contains(strings.Join(f.reads, ","), "episode") {
 		t.Fatalf("liked reads %v", f.reads)
 	}
-	d.Send(flatte.KeyEvent{Key: flatte.KeyTab})
 	d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
 	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
 	d.Settle()
@@ -577,6 +624,7 @@ func TestLikedSongsInTheLibrary(t *testing.T) {
 	if pl, _ := s.selected(); pl.URI != "spotify:playlist:a" || s.rail.Cursor() != 1 {
 		t.Fatalf("selected %+v at %d", pl, s.rail.Cursor())
 	}
+	focusLibrary(t, d)
 	d.Send(flatte.KeyEvent{Key: flatte.KeyUp})
 	fr := d.Settle()
 	if !strings.Contains(plain(fr), "Liked Songs") || !strings.Contains(plain(fr), "You · 1 song") || !strings.Contains(plain(fr), "♥") {
@@ -715,7 +763,8 @@ func TestSearchPasteAndErrors(t *testing.T) {
 	}
 	f.webFail = spotify.Error{Status: 403, Message: "Insufficient client scope"}
 	typeText(d, "!")
-	if fr := plain(d.Frame()); !strings.Contains(fr, "Could not search: Spotify: Insufficient client scope (403)") {
+	// Wrapped as the pane's width wants; the words are what count.
+	if fr := plain(d.Frame()); !strings.Contains(strings.Join(strings.Fields(strings.ReplaceAll(fr, "│", " ")), " "), "Could not search: Spotify: Insufficient client scope (403)") {
 		t.Fatalf("error:\n%s", fr)
 	}
 	f.webFail = nil
@@ -764,7 +813,7 @@ func TestHomeIsRecentlyPlayed(t *testing.T) {
 	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: 'h'})
 	fr := plain(d.Settle())
 	s := d.State()
-	if s.page != pageHome || strings.Count(fr, "Overture") != 1 || !strings.Contains(fr, "Recently played") || !strings.Contains(fr, "♥") {
+	if s.page != pageHome || strings.Count(fr, "Overture") != 1 || !strings.Contains(fr, "Recently played") || !strings.Contains(fr, "Liked Songs") {
 		t.Fatalf("home:\n%s", fr)
 	}
 	// The rail shows no selected list while Home is up.
@@ -830,6 +879,7 @@ func TestUnlikeEditsLikedSongsInPlace(t *testing.T) {
 	f.listings[liked] = full
 	f.liked = map[string]bool{song.URI: true, two.URI: true}
 	event(d, player.Ready{})
+	focusLibrary(t, d)
 	d.Send(flatte.KeyEvent{Key: flatte.KeyUp}) // to Liked Songs
 	d.Settle()
 	s := d.State()
@@ -1093,7 +1143,59 @@ func TestTerminalShowsTheSelectedRow(t *testing.T) {
 	d.State().page = pageLibrary
 	d.State().rail.Select(1)
 	fr := d.Settle()
-	if !strings.Contains(fr.Content, "48;2;59;51;85") {
-		t.Fatalf("no selection background in the terminal frame")
+	// Outlined in the accent: its top edge in the line above it.
+	if !strings.Contains(fr.Content, "38;2;157;123;255m╭") {
+		t.Fatalf("no selection outline in the terminal frame")
+	}
+}
+
+func TestScrollBarThumbIsHeldWhereGrabbed(t *testing.T) {
+	s := &State{}
+	s.tracks.SetCount(20)
+	s.tracks.SetHeight(8)
+	s.tracks.ScrollTo(6)
+	const height = 16
+	pos, size, _ := listBar(s.tracks, idTrackBar).Thumb(height)
+	if size < 2 {
+		t.Fatalf("thumb %d lines", size)
+	}
+	grabBar(s, idTrackBar, pos, height) // the thumb's first line
+	if s.tracks.Offset() != 6 {
+		t.Fatalf("pressing the thumb moved the list to %d", s.tracks.Offset())
+	}
+	last := 6
+	for dy := 1; dy <= 3; dy++ {
+		dragBar(s, idTrackBar, pos+dy, height)
+		if s.tracks.Offset() < last {
+			t.Fatalf("dragging down %d lines scrolled up to %d", dy, s.tracks.Offset())
+		}
+		last = s.tracks.Offset()
+	}
+	if last <= 6 {
+		t.Fatal("dragging the thumb down did not scroll")
+	}
+	grabBar(s, idTrackBar, height-1, height) // the track below: jump there
+	if s.tracks.Offset() != 12 {
+		t.Fatalf("pressing the track's end: offset %d", s.tracks.Offset())
+	}
+}
+
+func TestTransientFailuresStayOffScreen(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"Could not load the library: Get \"https://api\": context deadline exceeded", ""},
+		{"Could not search: context canceled", ""},
+		{"Could not list the tracks: read tcp: i/o timeout", ""},
+		{"Could not play: context deadline exceeded", "Could not play this song. Try again in a moment."},
+		{"Could not play: media is restricted", "Could not play: media is restricted"},
+	} {
+		got, ok := forUser(tc.in)
+		if ok != (tc.want != "") || got != tc.want {
+			t.Errorf("forUser(%q) = %q %v, want %q", tc.in, got, ok, tc.want)
+		}
+	}
+	s := &State{}
+	fail(s, "Could not load Home: context deadline exceeded")
+	if s.status != "" {
+		t.Fatalf("a timeout reached the status line: %q", s.status)
 	}
 }

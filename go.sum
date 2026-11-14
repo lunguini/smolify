@@ -29,8 +29,8 @@ github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6p
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/devgianlu/go-librespot v0.10.5 h1:cZq0hU02XN2cdzAQcbdMySWuzs6w2f7GfPflMTS0jv4=
-github.com/devgianlu/go-librespot v0.10.5/go.mod h1:gJ46H3EZCiObC5WlD1jF2trXhsT+F4AsRxPp2HAnv7g=
+github.com/devgianlu/go-librespot v0.10.6-0.20261104083510-b1b8b3ceb06e h1:9A/G8evkuJUiOrFgrraJ5k1Bz5G2KyIjSv/Siv+AXS4=
+github.com/devgianlu/go-librespot v0.10.6-0.20261104083510-b1b8b3ceb06e/go.mod h1:gJ46H3EZCiObC5WlD1jF2trXhsT+F4AsRxPp2HAnv7g=
 github.com/devgianlu/shannon v0.0.0-20230613115856-82ec90b7fa7e h1:OoETp+L//8ZDtd5BWKaogHQjgA104yF4a2yqjfaG3mE=
 github.com/devgianlu/shannon v0.0.0-20230613115856-82ec90b7fa7e/go.mod h1:m5DMFz6BcaKJwxxPaSh9MxwPzK2GPSt1KRFC8Imf0ik=
 github.com/ebitengine/purego v0.11.2 h1:WWiTx8rD8zYdOwSj8O/NiNbsOvSAgJMTlyV1XlbUSeU=
@@ -50,10 +50,10 @@ github.com/jfreymuth/pulse v0.1.2-0.20241102120944-4ffb35054b53/go.mod h1:cpYspI
 github.com/juju/gnuflag v0.0.0-20171113085948-2ce1bb71843d/go.mod h1:2PavIy+JPciBPrBUjwbNvtwB6RQlve+hkpll6QSNmOE=
 github.com/lucasb-eyer/go-colorful v1.4.0 h1:UtrWVfLdarDgc44HcS7pYloGHJUjHV/4FwW4TvVgFr4=
 github.com/lucasb-eyer/go-colorful v1.4.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
-github.com/lunguini/flatte v0.1.2-0.20261030125359-bc89bdb3626a h1:KiZzWJZX7WEa7NmRPBeah3ygIQMpw86heFOm48j3ru8=
-github.com/lunguini/flatte v0.1.2-0.20261030125359-bc89bdb3626a/go.mod h1:Iet7Zl+t7J/vcof6mmo1wZsZ8oRBIXgaFqBEbNNn0fE=
-github.com/lunguini/flatte/window v0.0.0-20261030125359-bc89bdb3626a h1:tP5nhVkydJ5L48R0vj7aN9TAIFmkFb1rfW9QVx++c6c=
-github.com/lunguini/flatte/window v0.0.0-20261030125359-bc89bdb3626a/go.mod h1:6/jtraVkOu7riuThWXqQ/lWYO+qQwziqT/r7/NCw6Yk=
+github.com/lunguini/flatte v0.3.0 h1:pHLtyoHhRojxCQwE5iZxpSEMrom4yJunDjOzvwZI0nE=
+github.com/lunguini/flatte v0.3.0/go.mod h1:Iet7Zl+t7J/vcof6mmo1wZsZ8oRBIXgaFqBEbNNn0fE=
+github.com/lunguini/flatte/window v0.2.0 h1:N5/25wJW4zUbJrLU1emXuqxXYhbnLOAQGl1XXFLrWwA=
+github.com/lunguini/flatte/window v0.2.0/go.mod h1:m1+yQphXViDyVLnL4S5cA5J//+mvsMOXMY4neZsEY9g=
 github.com/mattn/go-runewidth v0.0.23 h1:7ykA0T0jkPpzSvMS5i9uoNn2Xy3R383f9HDx3RybWcw=
 github.com/mattn/go-runewidth v0.0.23/go.mod h1:XBkDxAl56ILZc9knddidhrOlY5R/pDhgLpndooCuJAs=
 github.com/miekg/dns v1.1.27/go.mod h1:KNUDUusw/aVsxyTYZM1oqvCicbwhgbNgztCETuNZ7xM=

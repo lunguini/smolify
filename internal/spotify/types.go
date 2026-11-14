@@ -1,64 +1,32 @@
+//go:build !js || !wasm
+
 package spotify
 
-import "time"
+import "github.com/lunguini/smolify/internal/catalog"
 
 type page[T any] struct {
 	Items []T `json:"items"`
 }
 
 // Track is the search metadata used by the app.
-type Track struct {
-	URI        string   `json:"uri"`
-	Name       string   `json:"name"`
-	DurationMS int      `json:"duration_ms"`
-	Artists    []Artist `json:"artists"`
-	Album      Album    `json:"album"`
-}
+type Track = catalog.Track
 
 // SavedTrack is a track in the user's Liked Songs collection. AddedAt is zero
 // when the service does not include a saved timestamp for that item.
-type SavedTrack struct {
-	Track   Track
-	AddedAt time.Time
-}
+type SavedTrack = catalog.SavedTrack
 
 // SavedTracksPage is one bounded page of Liked Songs. Total is Spotify's
 // reported collection size; Items preserves one slot per returned raw item,
 // including entries whose metadata is unavailable.
-type SavedTracksPage struct {
-	Total  int
-	Items  []SavedTrack
-	Offset int
-	Limit  int
-}
+type SavedTracksPage = catalog.SavedTracksPage
 
-type Artist struct {
-	URI  string `json:"uri"`
-	Name string `json:"name"`
-}
+type Artist = catalog.Artist
 
-type Album struct {
-	URI     string   `json:"uri"`
-	Name    string   `json:"name"`
-	Images  []Image  `json:"images"`
-	Artists []Artist `json:"artists"`
-}
+type Album = catalog.Album
 
-type Playlist struct {
-	URI         string  `json:"uri"`
-	Name        string  `json:"name"`
-	Description string  `json:"description"`
-	Images      []Image `json:"images"`
-	Owner       struct {
-		DisplayName string `json:"display_name"`
-	} `json:"owner"`
-}
+type Playlist = catalog.Playlist
 
-type Image struct {
-	URL    string `json:"url"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-}
+type Image = catalog.Image
 
 // Cover is the URL of the smallest of images at least px wide, or the
 // largest when none is ("": none).
