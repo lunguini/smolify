@@ -93,7 +93,7 @@ func View(s *State, ctx flatte.RenderContext) flatte.Frame {
 				railView(s, g),
 				card(layout.NodeBase{ID: "center-card", W: layout.Grow(1), NoPadding: true}, centerView(s, g, ctx.Width)),
 			}},
-			playerBar(s, g),
+			playerBar(s, g, ctx.Width),
 		}}
 		if !g && s.focus == paneSearch {
 			// A blinking bar draws the eye to the search field.
@@ -301,6 +301,25 @@ func brandMark(g bool) layout.Node {
 	return mark
 }
 
+// framedPlayerColumns is the terminal width from which the player's
+// controls are framed buttons three rows tall; narrower, single glyphs.
+const framedPlayerColumns = 120
+
+// wordedPlayerColumns is the terminal width from which the player's
+// Shuffle and Repeat controls carry words.
+const wordedPlayerColumns = 140
+
+// worded gives a terminal icon button a word after its glyph: one cell
+// of symbol is hard to see and to hit. A GUI draws the icon alone.
+func worded(b layout.Button, g bool, word string) layout.Button {
+	if g {
+		return b
+	}
+	b.Label += " " + word
+	b.W, b.H = layout.Auto(), layout.Fixed(1)
+	return b
+}
+
 // topBar sits in the window's title strip, right of its buttons: back
 // and forward, and the search field in the middle.
 func topBar(s *State, g bool) layout.Node {
@@ -308,6 +327,7 @@ func topBar(s *State, g bool) layout.Node {
 		b := layout.Button{NodeBase: layout.NodeBase{ID: id, Tooltip: tip, W: layout.Points(32), H: layout.Points(32)}, Icon: icon, Label: label, Plain: true, Disabled: !can}
 		if !g {
 			b.H = layout.Fixed(1) // centered on the framed search field's line
+			b.Label = map[string]string{"‹": "←", "›": "→"}[label]
 		}
 		return b
 	}
@@ -345,8 +365,11 @@ func topBar(s *State, g bool) layout.Node {
 		search = layout.Row{NodeBase: layout.NodeBase{ID: idSearchBox, W: layout.Fixed(52), H: layout.Points(34), Gap: 1, PadLeft: 1, PadRight: 1, Box: box}, Align: layout.AlignCenter, Children: []layout.Node{icon, field}}
 	}
 	gear := layout.Button{NodeBase: layout.NodeBase{ID: idSettings, Tooltip: "Settings (⌘,)", W: layout.Points(32), H: layout.Points(32)}, Icon: layout.IconGear, Label: "⚙", Plain: true}
+	gear = worded(gear, g, "Settings")
+	// Settings stays at the right edge.
+	settingsSlot := layout.Row{NodeBase: layout.NodeBase{W: layout.Points(72)}, Align: layout.AlignCenter, Children: []layout.Node{layout.NewSpacer(), gear}}
 	if !g {
-		gear.H = layout.Fixed(1)
+		settingsSlot.W = layout.Auto()
 	}
 	if s.page == pageSettings {
 		gear.Style = layout.TextStyle{Fg: brand}
@@ -362,8 +385,7 @@ func topBar(s *State, g bool) layout.Node {
 		nav(idBack, layout.IconChevronLeft, "‹", "Back (⌘[)", len(s.back) > 0),
 		nav(idForward, layout.IconChevronRight, "›", "Forward (⌘])", len(s.forward) > 0),
 		searchArea,
-		// Settings stays at the right edge.
-		layout.Row{NodeBase: layout.NodeBase{W: layout.Points(72)}, Align: layout.AlignCenter, Children: []layout.Node{layout.NewSpacer(), gear}},
+		settingsSlot,
 	}}
 }
 
@@ -445,7 +467,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 	}
 	actions := layout.Row{NodeBase: layout.NodeBase{ID: "playlist-actions", Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 		playlistPlay,
-		layout.Button{NodeBase: layout.NodeBase{ID: idShufflePlay, Tooltip: "Shuffle (s)", W: layout.Points(32), H: layout.Points(32)}, Icon: layout.IconShuffle, Label: "⇄", Plain: true, Style: shuffle},
+		worded(layout.Button{NodeBase: layout.NodeBase{ID: idShufflePlay, Tooltip: "Shuffle (s)", W: layout.Points(32), H: layout.Points(32)}, Icon: layout.IconShuffle, Label: "⇄", Plain: true, Style: shuffle}, g, "Shuffle"),
 	}}
 	if g {
 		actions.Children = append(actions.Children, layout.NewSpacer(), filterView(s, g), sortView(s))
@@ -815,7 +837,7 @@ func plural(n int, what string) string {
 
 // playerBar is the now-playing bar: the track, the transport, the progress,
 // and the volume.
-func playerBar(s *State, g bool) layout.Node {
+func playerBar(s *State, g bool, width int) layout.Node {
 	title, artists := "Nothing playing", "Pick a playlist and press space"
 	coverURL := ""
 	if t := s.track; t != nil {
@@ -851,16 +873,49 @@ func playerBar(s *State, g bool) layout.Node {
 		play.Plain = !g
 		play.Style = layout.TextStyle{Fg: white, Size: float64(pick(g, 22, 0))}
 	}
+	skip := subtle // a terminal's glyphs are small enough: full brightness
+	if !g {
+		skip = layout.TextStyle{}
+	}
+	// Words fit beside the controls only in a wide terminal.
+	word := func(b layout.Button, w string) layout.Button {
+		if width < wordedPlayerColumns {
+			return b
+		}
+		return worded(b, g, w)
+	}
+	framed := !g && width >= framedPlayerColumns
 	controls := layout.Row{NodeBase: layout.NodeBase{ID: "player-controls", Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 		layout.NewSpacer(),
-		layout.Button{NodeBase: sq(idShuffle, "Shuffle (s)", 32), Icon: layout.IconShuffle, Label: "⇄", Plain: true, Style: mode(s.shuffle)},
-		layout.Button{NodeBase: sq(idPrev, "Previous (p)", 32), Icon: layout.IconPrevious, Label: "⏮", Plain: true, Style: subtle},
+		word(layout.Button{NodeBase: sq(idShuffle, "Shuffle (s)", 32), Icon: layout.IconShuffle, Label: "⇄", Plain: true, Style: mode(s.shuffle)}, "Shuffle"),
+		layout.Button{NodeBase: sq(idPrev, "Previous (p)", 32), Icon: layout.IconPrevious, Label: "⏮", Plain: true, Style: skip},
 		play,
-		layout.Button{NodeBase: sq(idNext, "Next (n)", 32), Icon: layout.IconNext, Label: "⏭", Plain: true, Style: subtle},
-		layout.Button{NodeBase: sq(idRepeat, repeatTip(s.repeat), 32), Icon: repeatIcon(s.repeat), Label: repeatLabel(s.repeat), Plain: true, Style: mode(s.repeat.Context || s.repeat.Track)},
+		layout.Button{NodeBase: sq(idNext, "Next (n)", 32), Icon: layout.IconNext, Label: "⏭", Plain: true, Style: skip},
+		word(layout.Button{NodeBase: sq(idRepeat, repeatTip(s.repeat), 32), Icon: repeatIcon(s.repeat), Label: repeatLabel(s.repeat), Plain: true, Style: mode(s.repeat.Context || s.repeat.Track)}, "Repeat"),
 		layout.NewSpacer(),
 	}}
 
+	if framed {
+		controls.Gap = 2
+		// A terminal glyph is one cell: a frame around each control makes
+		// it a target three rows tall, the play button's lit like a key.
+		for i, c := range controls.Children {
+			b, ok := c.(layout.Button)
+			if !ok {
+				continue
+			}
+			b.H, b.PadLeft, b.PadRight = layout.Fixed(3), 1, 1
+			if b.W.Kind == layout.SizePoints {
+				b.W = layout.Auto()
+			}
+			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+			if b.ID == idPlay {
+				b.Box.BorderColor, b.Default = brand, false
+				b.Plain, b.Style = true, layout.TextStyle{Bold: true, Fg: white}
+			}
+			controls.Children[i] = b
+		}
+	}
 	var pos, dur time.Duration
 	progress := 0.0
 	if t := s.track; t != nil && t.Duration > 0 {

@@ -60,7 +60,7 @@ func TestTerminalDescriptionDoesNotClipHeaderActions(t *testing.T) {
 func TestPlayerTimelineAboveControlsAndVolumeAligned(t *testing.T) {
 	s := sampleApp().State
 	m := layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32}
-	scene := layout.LayoutScene(playerBar(s, true), 1100, 120, m)
+	scene := layout.LayoutScene(playerBar(s, true, 0), 1100, 120, m)
 	seek, volume, play := scene.Rects[idProgress], scene.Rects[idVolume], scene.Rects[idPlay]
 	if seek.H == 0 || volume.H == 0 || play.H == 0 {
 		t.Fatal("missing player controls")
@@ -71,7 +71,7 @@ func TestPlayerTimelineAboveControlsAndVolumeAligned(t *testing.T) {
 	if seek.Y+seek.H/2 != volume.Y+volume.H/2 {
 		t.Fatalf("volume and seek not aligned: seek %v volume %v", seek, volume)
 	}
-	frame, comp := flatte.ComposeFrame(flatte.Frame{Root: playerBar(s, false)}, 110, 8)
+	frame, comp := flatte.ComposeFrame(flatte.Frame{Root: playerBar(s, false, 0)}, 110, 8)
 	if comp.Rects[idProgress].Y >= comp.Rects[idPlay].Y || comp.Rects[idProgress].Y != comp.Rects[idVolume].Y {
 		t.Fatalf("terminal player misaligned:\n%s", plain(frame))
 	}

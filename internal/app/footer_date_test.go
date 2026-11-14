@@ -9,7 +9,7 @@ import (
 )
 
 func TestPlaybackSourceUsesIcon(t *testing.T) {
-	scene := layout.LayoutScene(playerBar(sampleApp().State, true), 1100, 120, linkMetrics)
+	scene := layout.LayoutScene(playerBar(sampleApp().State, true, 0), 1100, 120, linkMetrics)
 	for _, value := range scene.Ops {
 		op, ok := value.(layout.ControlOp)
 		if !ok || op.ID != idPlaybackSource {

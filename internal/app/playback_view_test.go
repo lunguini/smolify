@@ -22,7 +22,7 @@ func TestPendingPlayHighlightsRequestedRowAndReplacesPlayGlyph(t *testing.T) {
 	if requested.Box.Background != playingBg || old.Box.Background != nil {
 		t.Fatal("requested row not the loading highlight")
 	}
-	scene := layout.LayoutScene(playerBar(s, true), 1100, 120, layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32})
+	scene := layout.LayoutScene(playerBar(s, true, 0), 1100, 120, layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32})
 	found := false
 	for _, op := range scene.Ops {
 		if c, ok := op.(layout.ControlOp); ok && c.ID == idPlay {
@@ -57,7 +57,7 @@ func TestPlayerFocusIsReflectedInPlayControl(t *testing.T) {
 	d, _ := ready(t)
 	s := d.State()
 	s.focus = panePlayer
-	scene := layout.LayoutScene(playerBar(s, true), 1100, 120, layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32})
+	scene := layout.LayoutScene(playerBar(s, true, 0), 1100, 120, layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32})
 	for _, raw := range scene.Ops {
 		if op, ok := raw.(layout.ControlOp); ok && op.ID == idPlay {
 			if !op.Focused {

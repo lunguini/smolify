@@ -23,7 +23,7 @@ func filterView(s *State, g bool) layout.Node {
 		if g {
 			size.W, size.H = layout.Auto(), layout.Auto()
 		}
-		return layout.Button{NodeBase: size, Icon: layout.IconSearch, Label: "⌕", Plain: true}
+		return worded(layout.Button{NodeBase: size, Icon: layout.IconSearch, Label: "⌕", Plain: true}, g, "Find")
 	}
 	field := s.trackFilter.Layout(idTrackFilter, focused)
 	field.Clearable = true

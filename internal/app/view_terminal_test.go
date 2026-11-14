@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/lunguini/flatte"
+	"github.com/lunguini/flatte/flatest"
 	"github.com/lunguini/flatte/flatui/layout"
 )
 
@@ -40,5 +41,19 @@ func TestTerminalSearchCaretBlinks(t *testing.T) {
 	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: '/'})
 	if c := d.Frame().CursorStyle; c == nil || !c.Blink || c.Shape != flatte.CursorShapeBar {
 		t.Fatalf("search caret %+v, want a blinking bar", c)
+	}
+}
+
+// A wide terminal frames the player's five controls and words Shuffle
+// and Repeat; a narrow one keeps single glyphs so they all fit.
+func TestTerminalPlayerControlsGrowWithWidth(t *testing.T) {
+	s := sampleApp().State
+	wide := layout.Compose(playerBar(s, false, 160), 160, 6).Frame
+	if n := strings.Count(wide, "╭"); n < 5 || !strings.Contains(wide, "Shuffle") || !strings.Contains(wide, "Repeat") {
+		t.Errorf("wide player: %d frames\n%s", n, flatest.CleanFrame(wide))
+	}
+	narrow := layout.Compose(playerBar(s, false, 100), 100, 6).Frame
+	if strings.Contains(narrow, "╭") || strings.Contains(narrow, "Shuffle") {
+		t.Errorf("narrow player is framed or worded:\n%s", flatest.CleanFrame(narrow))
 	}
 }
