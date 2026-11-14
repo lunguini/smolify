@@ -60,12 +60,13 @@ jobs:
         if: matrix.goos != 'windows'
         # The runner is thrown away: removing the codecs' shared libraries
         # leaves the linker their static archives, so users need nothing
-        # installed. ALSA and the system libraries stay shared.
+        # installed. ALSA and the system libraries stay shared, and on Linux
+        # mpg123 too: Ubuntu ships no static archive of it.
         run: |
           if [ "${{ matrix.goos }}" = darwin ]; then
             for f in libogg libvorbis flac mpg123; do rm -f "$(brew --prefix $f)"/lib/*.dylib; done
           else
-            sudo rm -f /usr/lib/*-linux-gnu/lib{ogg,vorbis,vorbisenc,vorbisfile,FLAC,mpg123}.so
+            sudo rm -f /usr/lib/*-linux-gnu/lib{ogg,vorbis,vorbisenc,vorbisfile,FLAC}.so
           fi
           echo 'PKG_CONFIG=pkg-config --static' >> "$GITHUB_ENV"
 
