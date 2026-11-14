@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"errors"
+	"image"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatest"
+	"github.com/lunguini/flatte/flatui/layout"
 	"github.com/lunguini/smolify/internal/player"
 )
 
@@ -384,5 +386,53 @@ func TestAudioApplyCapturesSettingsWhileLaterEditsStayPending(t *testing.T) {
 	}
 	if s.activeAudio != wantApplied || s.settings.Audio() != newer.Audio() || s.settings.Audio() == s.activeAudio {
 		t.Fatalf("apply/staging crossed: active=%+v saved=%+v", s.activeAudio, s.settings.Audio())
+	}
+}
+
+func TestTerminalImagesSetting(t *testing.T) {
+	d, _, path := settingsDriver(t)
+	s := d.State()
+	click(t, d, idSettings)
+	if fr := plain(d.Frame()); !strings.Contains(fr, "Half-blocks") {
+		t.Fatalf("terminal settings miss the images row:\n%s", fr)
+	}
+	if d.Frame().CellImages {
+		t.Fatal("pictures are the default, yet the frame turns them off")
+	}
+	click(t, d, setImages+":1")
+	if s.settings.Images != imagesHalfBlocks || !d.Frame().CellImages {
+		t.Fatalf("half-blocks: images %d, cell images %v", s.settings.Images, d.Frame().CellImages)
+	}
+	if saved, _ := LoadSettings(path); saved.Images != imagesHalfBlocks {
+		t.Fatalf("saved %+v", saved)
+	}
+	changeSetting(s, setImages, 1)
+	if s.settings.Images != imagesOff {
+		t.Fatalf("step: images %d", s.settings.Images)
+	}
+	art := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	s.covers["u"] = art
+	if im, ok := cover(s, "u", 64, false).(layout.Image); !ok || im.Source != nil {
+		t.Fatalf("images off: cover %#v keeps its picture", im)
+	}
+	if im := cover(s, "u", 64, true).(layout.Image); im.Source == nil {
+		t.Fatal("a window lost its covers to the terminal setting")
+	}
+	changeSetting(s, setImages, -1)
+	changeSetting(s, setImages, -1)
+	if s.settings.Images != imagesPictures {
+		t.Fatalf("step back: images %d", s.settings.Images)
+	}
+}
+
+func TestWindowSettingsHaveNoImagesRow(t *testing.T) {
+	s := &State{windowed: true}
+	for _, id := range settingRows(s) {
+		if id == setImages {
+			t.Fatal("a window lists the terminal images setting")
+		}
+	}
+	if len(settingRows(&State{})) != len(settingIDs) {
+		t.Fatal("a terminal hides a setting")
 	}
 }

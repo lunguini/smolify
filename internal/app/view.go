@@ -95,6 +95,10 @@ func View(s *State, ctx flatte.RenderContext) flatte.Frame {
 			}},
 			playerBar(s, g, ctx.Width),
 		}}
+		// Pictures are a terminal's choice; the half-blocks under them
+		// stand alone when the user prefers them (and with images off,
+		// covers carry no picture at all).
+		frame.CellImages = !g && s.settings.Images != imagesPictures
 		if !g && s.focus == paneSearch {
 			// A blinking bar draws the eye to the search field.
 			frame.CursorStyle = &flatte.CursorStyle{Shape: flatte.CursorShapeBar, Blink: true}
@@ -159,7 +163,7 @@ func railView(s *State, g bool) layout.Node {
 		}
 		art := thumb(s, pl.Image, 32, g)
 		if s.username != "" && pl.URI == model.LikedSongs(s.username) {
-			art = likedTile(32, g)
+			art = likedTile(s, 32, g)
 		}
 		row := layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(railRowLines), Gap: 1, PadLeft: 1, PadRight: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 			art,
@@ -278,9 +282,9 @@ func navItem(s *State, g bool, id string, icon layout.IconName, text, label stri
 
 // likedTile is Liked Songs' cover: a white heart on Smolify's art (in a
 // terminal, which draws no backdrops, one picture of both).
-func likedTile(size int, g bool) layout.Node {
+func likedTile(s *State, size int, g bool) layout.Node {
 	if !g {
-		return layout.Image{NodeBase: layout.NodeBase{W: layout.Points(size), H: layout.Points(size)}, Source: likedArt(), Text: coverText(size), Fit: layout.ImageCover}
+		return picture(s, g, layout.Image{NodeBase: layout.NodeBase{W: layout.Points(size), H: layout.Points(size)}, Source: likedArt(), Text: coverText(size), Fit: layout.ImageCover})
 	}
 	heart := layout.Icon{NodeBase: layout.NodeBase{W: layout.Points(size * 2 / 3), H: layout.Points(size * 2 / 3)}, Name: layout.IconHeart, Text: "♥ ", Style: layout.TextStyle{Fg: white}}
 	return layout.Row{NodeBase: layout.NodeBase{W: layout.Points(size), H: layout.Points(size), Box: layout.Box{Background: artVeil, Round: true, Backdrop: &layout.Backdrop{Source: smolArt()}}}, Align: layout.AlignCenter, Children: []layout.Node{
@@ -476,7 +480,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 		wash = smolArt()
 	}
 	if s.username != "" && pl.URI == model.LikedSongs(s.username) {
-		art, wash = likedTile(size, g), smolArt()
+		art, wash = likedTile(s, size, g), smolArt()
 	}
 	box := layout.Box{Background: s.tints[pl.Image], Round: true}
 	if wash != nil {
@@ -752,9 +756,9 @@ func heart(liked bool, id string) layout.Node {
 // thumb is the row thumbnail of the cover at url, size points square.
 func thumb(s *State, url string, size int, g bool) layout.Node {
 	if im := s.thumbs[url]; im != nil {
-		return layout.Image{NodeBase: layout.NodeBase{W: layout.Points(size), H: layout.Points(size), Box: layout.Box{Round: true}}, Source: im, Text: coverText(size), Fit: layout.ImageCover}
+		return picture(s, g, layout.Image{NodeBase: layout.NodeBase{W: layout.Points(size), H: layout.Points(size), Box: layout.Box{Round: true}}, Source: im, Text: coverText(size), Fit: layout.ImageCover})
 	}
-	return cover(&State{}, url, size, g) // a loading tile, or Smolify's art
+	return cover(&State{settings: s.settings}, url, size, g) // a loading tile, or Smolify's art
 }
 
 // total is how long tracks last together: "52 min" or "3 h 12 min".
@@ -770,6 +774,14 @@ func total(tracks []model.Track) string {
 	return fmt.Sprintf("%d h %d min", h, m)
 }
 
+// picture is im, or in a terminal with images turned off its text alone.
+func picture(s *State, g bool, im layout.Image) layout.Image {
+	if !g && s.settings.Images == imagesOff {
+		im.Source = nil
+	}
+	return im
+}
+
 // cover is the image at url, size points square — in a terminal (which
 // shows an image's text) and until it loads, a ♫ on a tile; with no url
 // (a playlist without a cover), the ♫ on Smolify's own art.
@@ -777,10 +789,10 @@ func cover(s *State, url string, size int, g bool) layout.Node {
 	// A blank picture behind the tile rounds it as the covers it stands for.
 	nb := layout.NodeBase{W: layout.Points(size), H: layout.Points(size), Box: layout.Box{Background: tileBg, Round: true, Backdrop: &layout.Backdrop{Source: blankArt}}}
 	if im := s.covers[url]; im != nil {
-		return layout.Image{NodeBase: layout.NodeBase{W: nb.W, H: nb.H, Box: layout.Box{Round: true}}, Source: im, Text: coverText(size), Fit: layout.ImageCover}
+		return picture(s, g, layout.Image{NodeBase: layout.NodeBase{W: nb.W, H: nb.H, Box: layout.Box{Round: true}}, Source: im, Text: coverText(size), Fit: layout.ImageCover})
 	}
 	if url == "" && !g { // a terminal draws no backdrops: the art as a picture
-		return layout.Image{NodeBase: layout.NodeBase{W: nb.W, H: nb.H}, Source: smolArt(), Text: coverText(size), Fit: layout.ImageCover}
+		return picture(s, g, layout.Image{NodeBase: layout.NodeBase{W: nb.W, H: nb.H}, Source: smolArt(), Text: coverText(size), Fit: layout.ImageCover})
 	}
 	style := subtle
 	if url == "" {
@@ -895,9 +907,7 @@ func playerBar(s *State, g bool, width int) layout.Node {
 			if !ok {
 				continue
 			}
-			// A 6×3 square inside: three lines, so terminals without
-			// pictures draw the shape in half-blocks too.
-			b.W, b.H = layout.Fixed(8), layout.Fixed(5)
+			b.W, b.H = layout.Fixed(6), layout.Fixed(4) // a 4×2 square inside
 			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
 			if b.ID == idPlay {
 				b.Box.BorderColor, b.Default = brand, false

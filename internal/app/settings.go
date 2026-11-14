@@ -35,7 +35,19 @@ type Settings struct {
 
 	DeviceName string `json:"device_name"`
 	Compact    bool   `json:"compact_rows"`
+
+	// Images is how a terminal shows covers: imagesPictures,
+	// imagesHalfBlocks, or imagesOff. A window always shows pictures.
+	Images int `json:"terminal_images"`
 }
+
+// The terminal image choices: real pictures where the terminal can show
+// them, colored half-block cells, or no images (covers are a ♫ tile).
+const (
+	imagesPictures = iota
+	imagesHalfBlocks
+	imagesOff
+)
 
 // DefaultSettings are a first launch's settings.
 func DefaultSettings() Settings {
@@ -76,16 +88,32 @@ const (
 	setApplyAudio   = "set:apply-audio"
 	setDeviceName   = "set:device-name"
 	setCompact      = "set:compact"
+	setImages       = "set:images"
 	setSignOut      = "set:sign-out"
 )
 
 // settingIDs are the rows in page order.
-var settingIDs = []string{setNotifyErrors, setNotifyTracks, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setDeviceName, setCompact, setSignOut}
+var settingIDs = []string{setNotifyErrors, setNotifyTracks, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setDeviceName, setCompact, setImages, setSignOut}
+
+// settingRows are the rows s shows: a window has no terminal images.
+func settingRows(s *State) []string {
+	if !s.windowed {
+		return settingIDs
+	}
+	rows := make([]string, 0, len(settingIDs)-1)
+	for _, id := range settingIDs {
+		if id != setImages {
+			rows = append(rows, id)
+		}
+	}
+	return rows
+}
 
 // The choices of the two multi-way settings, in order.
 var (
 	qualities  = []choice{{"Low", 96}, {"Normal", 160}, {"High", 320}}
 	crossfades = []choice{{"Off", 0}, {"2 s", 2}, {"5 s", 5}, {"10 s", 10}}
+	imageModes = []choice{{"Pictures", imagesPictures}, {"Half-blocks", imagesHalfBlocks}, {"Off", imagesOff}}
 )
 
 type choice struct {
@@ -122,6 +150,8 @@ func changeSetting(s *State, id string, step int) {
 		st.Bitrate = qualities[wrap(pickOf(qualities, st.Bitrate)+step, len(qualities))].value
 	case setCrossfade:
 		st.Crossfade = crossfades[wrap(pickOf(crossfades, st.Crossfade)+step, len(crossfades))].value
+	case setImages:
+		st.Images = imageModes[wrap(pickOf(imageModes, st.Images)+step, len(imageModes))].value
 	case setApplyAudio:
 		applyAudioSettings(s)
 		return
@@ -147,6 +177,8 @@ func chooseSetting(s *State, id string, n int) {
 		st.Bitrate = qualities[n].value
 	case id == setCrossfade && n >= 0 && n < len(crossfades):
 		st.Crossfade = crossfades[n].value
+	case id == setImages && n >= 0 && n < len(imageModes):
+		st.Images = imageModes[n].value
 	default:
 		return
 	}
@@ -234,13 +266,18 @@ func openSettings(s *State) {
 // settingsKey moves through the settings and changes them: ↑/↓ pick a row,
 // Space/Enter flip or step it, ←/→ step a choice, Esc goes back.
 func settingsKey(s *State, k flatte.KeyEvent) bool {
-	i := max(s.settingCursor, 0)
+	settingIDs := settingRows(s)
+	i := min(max(s.settingCursor, 0), len(settingIDs)-1)
 	switch k.Key {
 	case flatte.KeyLeft, flatte.KeyRight, flatte.KeyEnter:
 		if settingsChoiceKey(s, settingIDs[i], k.Key) {
 			return true
 		}
-		changeSetting(s, settingIDs[i], 1)
+		step := 1
+		if k.Key == flatte.KeyLeft {
+			step = -1
+		}
+		changeSetting(s, settingIDs[i], step)
 	case flatte.KeyUp, flatte.KeyDown:
 		if settingsChoiceKey(s, settingIDs[i], k.Key) {
 			return true
@@ -349,6 +386,7 @@ func deviceKey(s *State, k flatte.KeyEvent, fx flatte.Effects[State]) {
 // line about it on the left and its control on the right.
 func settingsView(s *State, g bool) layout.Node {
 	st := s.settings
+	settingIDs := settingRows(s)
 	cursor := ""
 	if s.focus == paneSettings && s.settingCursor >= 0 && s.settingCursor < len(settingIDs) {
 		cursor = settingIDs[s.settingCursor]
@@ -395,8 +433,21 @@ func settingsView(s *State, g bool) layout.Node {
 		section("DEVICE AND ACCOUNT"),
 		row(setDeviceName, "Device name", "How Smolify shows in Spotify Connect (Enter to keep)", name),
 		row(setCompact, "Compact rows", "One line per song", toggle(setCompact, st.Compact)),
-		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Fg: danger}, Disabled: !supportsSignOut(s)}),
 	}
+	if !g {
+		modes := layout.Row{NodeBase: layout.NodeBase{Gap: 1}}
+		for n, m := range imageModes {
+			b := layout.Button{NodeBase: layout.NodeBase{ID: setImages + ":" + strconv.Itoa(n)}, Label: m.label, Plain: m.value != st.Images, Style: subtle}
+			if m.value == st.Images {
+				b.Style = layout.TextStyle{Fg: brand, Bold: true}
+			}
+			modes.Children = append(modes.Children, b)
+		}
+		body = append(body, row(setImages, "Images", "Covers as pictures (where the terminal can), colored blocks, or none", modes))
+	}
+	body = append(body,
+		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Fg: danger}, Disabled: !supportsSignOut(s)}),
+	)
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Grow(1), Pad: pick(g, 2, 1)}, Children: []layout.Node{
 		layout.Scroll{NodeBase: layout.NodeBase{ID: idSettingsScroll, W: layout.Grow(1), H: layout.Grow(1)}, OffsetY: s.settingsScroll, Child: layout.Col{NodeBase: layout.NodeBase{ID: idSettingsContent, W: layout.Grow(1)}, Children: body}},
 	}}
@@ -418,6 +469,10 @@ func clampSettings(s *State) {
 func revealSetting(s *State) {
 	view, okV := s.settingRects[idSettingsScroll]
 	content, okC := s.settingRects[idSettingsContent]
+	settingIDs := settingRows(s)
+	if s.settingCursor < 0 || s.settingCursor >= len(settingIDs) {
+		return
+	}
 	row, okR := s.settingRects[settingIDs[s.settingCursor]]
 	if !okV || !okC || !okR {
 		return
@@ -450,7 +505,7 @@ func settingClicked(s *State, target string) bool {
 		selectChoice = &s.settingCrossfade
 	}
 	if selectChoice != nil && selectChoice.Click(target, id+":select") {
-		for i, sid := range settingIDs {
+		for i, sid := range settingRows(s) {
 			if sid == id {
 				s.settingCursor = i
 			}
@@ -463,7 +518,7 @@ func settingClicked(s *State, target string) bool {
 	}
 	s.settingQuality.Close()
 	s.settingCrossfade.Close()
-	for i, sid := range settingIDs {
+	for i, sid := range settingRows(s) {
 		if sid == id {
 			s.settingCursor = i
 		}
