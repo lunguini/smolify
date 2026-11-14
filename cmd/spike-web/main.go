@@ -35,13 +35,15 @@ func main() {
 	q := flag.String("q", "harder better", "the search to try")
 	flag.Parse()
 
+	fmt.Printf("starting\n")
+
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		fail(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
-	p, err := player.Start(ctx, player.Options{Dir: filepath.Join(dir, "smolify"), DeviceName: "Smolify (probe)"})
+	p, err := player.Start(ctx, player.Options{Dir: filepath.Join(dir, "smolify"), DeviceName: "Smolify (probe)", Log: os.Stderr})
 	if err != nil {
 		fail(err)
 	}

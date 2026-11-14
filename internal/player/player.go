@@ -33,6 +33,9 @@ type Options struct {
 	Volume int
 	// Audio is how it plays.
 	Audio Audio
+	// Log receives go-librespot's log (nil: discarded, as a terminal UI
+	// owns the screen).
+	Log io.Writer
 }
 
 // bitrate is a's bitrate, 320 unless it is one Spotify streams.
@@ -115,7 +118,12 @@ func Start(ctx context.Context, opts Options) (*Player, error) {
 	}
 	// go-librespot's audio output logs through logrus directly; anything it
 	// writes would land on the terminal frame.
-	logrus.SetOutput(io.Discard)
+	if opts.Log != nil {
+		logrus.SetOutput(opts.Log)
+	} else {
+		logrus.SetOutput(io.Discard)
+	}
+	preferPort80()
 	p := &Player{events: make(chan Event, 256), ctx: ctx, opts: opts}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -154,7 +162,7 @@ func (p *Player) launch() error {
 		newApp = func(o *daemon.Options) (sessionApp, error) { return daemon.New(o) }
 	}
 	app, err := newApp(&daemon.Options{
-		Logger:     quietLogger{},
+		Logger:     logger{w: opts.Log},
 		StateStore: fileStore{dir: opts.Dir},
 		APIServer:  session.srv,
 		Config: &daemon.Config{
