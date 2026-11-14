@@ -60,3 +60,61 @@ func (v vrule) Render(r layout.Rect) string {
 	}
 	return lipgloss.NewStyle().Foreground(searchBorder).Render(strings.Join(lines, "\n"))
 }
+
+// pillCap is a line of room between two list rows that rounds the
+// selected one beside it: half a line of its highlight, cornered with
+// quadrants (▗▄▄▖ above it, ▝▀▀▘ below), so the selection reads as a
+// rounded pill in the highlight's own color. Blank beside no selection.
+type pillCap struct {
+	layout.NodeBase
+	below    bool
+	selected bool
+}
+
+func (p pillCap) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
+
+func (p pillCap) Render(r layout.Rect) string {
+	if !p.selected || r.W < 2 {
+		return strings.Repeat(" ", max(r.W, 0))
+	}
+	left, fill, right := "▗", "▄", "▖"
+	if p.below {
+		left, fill, right = "▝", "▀", "▘"
+	}
+	return lipgloss.NewStyle().Foreground(termSelectBg).Render(left + strings.Repeat(fill, r.W-2) + right)
+}
+
+// roomyRows puts a line of room between rows' entries in a terminal, the
+// selected entry's rounded above and below (see pillCap).
+func roomyRows(rows *layout.Col) {
+	if len(rows.Children) == 0 {
+		return
+	}
+	selected := func(n layout.Node) bool {
+		r, ok := n.(layout.Row)
+		return ok && r.Box.Selected && r.Box.Background == termSelectBg
+	}
+	out := make([]layout.Node, 0, 2*len(rows.Children))
+	for i, c := range rows.Children {
+		if selected(c) {
+			// The selection's color shows through the entry (a playing
+			// song keeps its violet title), matching the caps around it.
+			r := c.(layout.Row)
+			r.Children = append([]layout.Node(nil), r.Children...)
+			for j, child := range r.Children {
+				if inner, ok := child.(layout.Row); ok {
+					inner.Box.Background = nil
+					r.Children[j] = inner
+				}
+			}
+			c = r
+			rows.Children[i] = r
+		}
+		if i > 0 {
+			above, below := selected(rows.Children[i-1]), selected(c)
+			out = append(out, pillCap{selected: above || below, below: above})
+		}
+		out = append(out, c)
+	}
+	rows.Children, rows.Gap = out, 0
+}

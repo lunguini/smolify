@@ -36,11 +36,12 @@ func TestPlaylistFilterStartsAsCompactIconAndExpandsBesideSort(t *testing.T) {
 	if scene.Rects[idSort].H != 32 {
 		t.Fatal("opening sort changed its button height")
 	}
-	// The compact tool row remains one line in a terminal.
+	// In a terminal both are framed as the search field is, side by side.
 	s.trackSort.Close()
 	frame, comp := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 80}), 80, 30)
-	if comp.Rects[idTrackFilterBox].H != 1 || comp.Rects[idSort].H != 1 {
-		t.Fatalf("terminal controls not one line:\n%s", plain(frame))
+	tbox, tsort := comp.Rects[idTrackFilterBox], comp.Rects[idSort]
+	if tbox.H != 3 || tsort.H != 3 || tbox.Y != tsort.Y || tbox.X+tbox.W > tsort.X {
+		t.Fatalf("terminal controls not framed side by side:\n%s", plain(frame))
 	}
 	s.trackFilter.Value = "no-matching-song-349810"
 	if got := labels(View(s, flatte.RenderContext{Graphical: true}).Root); !strings.Contains(got, "No songs match your filter.") {

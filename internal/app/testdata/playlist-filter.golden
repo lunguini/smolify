@@ -10,14 +10,14 @@
                                 │                    ╭─────╮ ╭─────────────╮
  Your Library                 2 │                    │  ▶  │ │  ⇄ Shuffle  │
                                 │                    ╰─────╯ ╰─────────────╯
-    ♫  bass house               │                               ⌕  Gravity         [ Position ↑ ▾ ]
-       Playlist · adrian        │
-                                │    #        Title                    Album                   ◷ 
-  ▀▀▀▀ Car Music                │ ─────────────────────────────────────────────────────────────────
-  ▀▀▀▀ Playlist · adrian        │    2  ▀▀▀▀  Gravity                 Fall                 3:05  
+    ♫  bass house               │                   ╭────────────────────────╮ ╭──────────────────╮
+       Playlist · adrian        │                   │ ⌕  Gravity             │ │  ⇅ Position ↑ ▾  │
+ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘   │                   ╰────────────────────────╯ ╰──────────────────╯
+  ▀▀▀▀ Car Music                │
+  ▀▀▀▀ Playlist · adrian        │    #        Title                    Album                   ◷ 
+                                │ ─────────────────────────────────────────────────────────────────
+                                │    2  ▀▀▀▀  Gravity                 Fall                 3:05  
                                 │       ▀▀▀▀  Dua                                                
-                                │
-                                │
                                 │
                                 │
                                 │
@@ -28,5 +28,5 @@
  ▀▀▀▀▀▀▀▀ Nothing playing                    ⇄    ⏮   [▶]   ⏭    ↻ 
  ▀▀▀▀▀▀▀▀ Pick a playlist and pr…
  ▀▀▀▀▀▀▀▀
-[cursor 74,12]
+[cursor 64,13]
 [title Smolify]

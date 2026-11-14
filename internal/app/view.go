@@ -205,10 +205,10 @@ func railView(s *State, g bool) layout.Node {
 		return row
 	})
 	rows.ID, rows.W, rows.H = idRail, layout.Grow(1), layout.Grow(1)
+	withHover(&rows, s.page == pageLibrary, g)
 	if !g {
-		rows.Gap = 1 // a line between entries, easier to read
-	}
-	withHover(&rows, s.page == pageLibrary, g) // the center shows Home or search, not a list
+		roomyRows(&rows) // a line between entries, easier to read
+	} // the center shows Home or search, not a list
 	count := ""
 	if n := len(lib); n > 0 {
 		count = strconv.Itoa(n)
@@ -517,6 +517,9 @@ func centerView(s *State, g bool, width int) layout.Node {
 			}
 			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
 			if b.ID == idPlayList {
+				// About square on screen (a cell is twice as tall as
+				// wide), the glyph centered.
+				b.W = layout.Fixed(7)
 				b.Box.BorderColor, b.Default = brand, false
 				b.Plain, b.Style = true, layout.TextStyle{Bold: true, Fg: white}
 			}
@@ -565,7 +568,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 	}
 	children := []layout.Node{header}
 	if !g {
-		children = append(children, layout.Row{NodeBase: layout.NodeBase{ID: "song-tools", PadLeft: 1, PadRight: 1, Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{layout.NewSpacer(), filterView(s, g), sortView(s)}})
+		children = append(children, layout.Row{NodeBase: layout.NodeBase{ID: "song-tools", PadLeft: 1, PadRight: 1, Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{layout.NewSpacer(), filterView(s, g), framedSort(s)}})
 	}
 	children = append(children, layout.Col{NodeBase: layout.NodeBase{PadLeft: 1, PadRight: 1, H: layout.Grow(1)}, Children: []layout.Node{note, trackTable(s, l, listed, g, width)}})
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Grow(1)}, Children: children}
@@ -656,10 +659,10 @@ func trackTable(s *State, l model.Listing, listed bool, g bool, width int) layou
 		return trackRow(s, numbers[i]-1, l.Tracks[i], g, dateColumn)
 	})
 	rows.ID, rows.W, rows.H = idTracks, layout.Grow(1), layout.Grow(1)
-	if !g && !s.compact {
-		rows.Gap = 1 // a line between songs, easier to read
-	}
 	withHover(&rows, true, g)
+	if !g && !s.compact {
+		roomyRows(&rows) // a line between songs, easier to read
+	}
 	return layout.Col{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{
 		header,
 		rule,
@@ -965,7 +968,9 @@ func playerBar(s *State, g bool, width int) layout.Node {
 			if !ok {
 				continue
 			}
-			b.W, b.H = layout.Fixed(6), layout.Fixed(4) // a 4×2 square inside
+			// Square on screen (a cell is twice as tall as it is wide), with
+			// room inside for the icon's picture.
+			b.W, b.H = layout.Fixed(8), layout.Fixed(4)
 			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
 			if b.ID == idPlay {
 				b.Box.BorderColor, b.Default = brand, false
