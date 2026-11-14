@@ -28,10 +28,17 @@ func focusClickBackground(t *testing.T, d *flatest.Driver[State], id string, hei
 	if !ok || r.W < 2 || r.H < 2 {
 		t.Fatalf("missing background %s: %v", id, r)
 	}
+	// The lowest line of the list on no item: below the last row, or a
+	// gap between two.
 	x, y := r.X+1, r.Y+r.H-1
-	target, _ := comp.HitTest(x, y)
-	if _, row := rowIndex(id, target); row {
-		t.Fatalf("background point hit item %s", target)
+	for ; y >= r.Y; y-- {
+		target, _ := comp.HitTest(x, y)
+		if _, row := rowIndex(id, target); !row {
+			break
+		}
+	}
+	if y < r.Y {
+		t.Fatalf("no background in %s", id)
 	}
 	d.Send(flatte.MouseEvent{X: x, Y: y, Button: flatte.MouseLeft, Action: flatte.MousePress})
 }

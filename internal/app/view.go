@@ -205,6 +205,9 @@ func railView(s *State, g bool) layout.Node {
 		return row
 	})
 	rows.ID, rows.W, rows.H = idRail, layout.Grow(1), layout.Grow(1)
+	if !g {
+		rows.Gap = 1 // a line between entries, easier to read
+	}
 	withHover(&rows, s.page == pageLibrary, g) // the center shows Home or search, not a list
 	count := ""
 	if n := len(lib); n > 0 {
@@ -504,6 +507,22 @@ func centerView(s *State, g bool, width int) layout.Node {
 	if g {
 		actions.Children = append(actions.Children, layout.NewSpacer(), filterView(s, g), sortView(s))
 	}
+	if !g && !playlistPlay.Disabled {
+		// Rounded keys, as the player's: the play key lit.
+		for i, c := range actions.Children {
+			b := c.(layout.Button)
+			b.H, b.PadLeft, b.PadRight = layout.Fixed(3), 1, 1
+			if b.W.Kind == layout.SizePoints {
+				b.W = layout.Auto()
+			}
+			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+			if b.ID == idPlayList {
+				b.Box.BorderColor, b.Default = brand, false
+				b.Plain, b.Style = true, layout.TextStyle{Bold: true, Fg: white}
+			}
+			actions.Children[i] = b
+		}
+	}
 	info = append(info, actions)
 	size := pick(g, headerCover, 128) // 16×8 cells: room for half-block art
 	art, wash := cover(s, pl.Image, size, g), s.covers[pl.Image]
@@ -520,12 +539,17 @@ func centerView(s *State, g bool, width int) layout.Node {
 		box.Backdrop = &layout.Backdrop{Source: wash, Blur: 40}
 		box.Background = backdropDim
 	}
+	if !g {
+		// A terminal draws no blurred wash: the dimming alone would be a
+		// dark band around the cover.
+		box = layout.Box{}
+	}
 	pad := pick(g, 2, 0)
 	infoHeight := layout.Auto()
 	if g {
 		infoHeight = layout.Points(size)
 	}
-	header := layout.Row{NodeBase: layout.NodeBase{ID: "playlist-header", NoPadding: true, Gap: 3, PadLeft: 2, PadRight: 2, PadTop: pad, PadBottom: pad, Box: box}, Children: []layout.Node{
+	header := layout.Row{NodeBase: layout.NodeBase{ID: "playlist-header", NoPadding: true, Gap: 3, PadLeft: pick(g, 2, 1), PadRight: 2, PadTop: pad, PadBottom: pad, Box: box}, Children: []layout.Node{
 		art,
 		layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: infoHeight}, Children: info},
 	}}
@@ -632,6 +656,9 @@ func trackTable(s *State, l model.Listing, listed bool, g bool, width int) layou
 		return trackRow(s, numbers[i]-1, l.Tracks[i], g, dateColumn)
 	})
 	rows.ID, rows.W, rows.H = idTracks, layout.Grow(1), layout.Grow(1)
+	if !g && !s.compact {
+		rows.Gap = 1 // a line between songs, easier to read
+	}
 	withHover(&rows, true, g)
 	return layout.Col{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{
 		header,

@@ -52,7 +52,7 @@ func TestTerminalDescriptionDoesNotClipHeaderActions(t *testing.T) {
 	s := sampleApp().State
 	frame, _ := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 80}), 80, 30)
 	text := plain(frame)
-	if !strings.Contains(text, "Position ↑") || !strings.Contains(text, "[▶]") {
+	if !strings.Contains(text, "Position ↑") || !strings.Contains(text, "│  ▶  │") {
 		t.Fatalf("header actions clipped:\n%s", text)
 	}
 }
