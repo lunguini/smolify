@@ -387,7 +387,7 @@ func worded(b layout.Button, g bool, word string) layout.Button {
 // topBar sits in the window's title strip, right of its buttons: back
 // and forward, and the search field in the middle.
 // barLines is the terminal top bar's height above the divider under it.
-const barLines = 2
+const barLines = 3
 
 // terminalTopBar is the top bar in a terminal: the logo and name over the
 // rail, then the history keys, the search field, and Settings. The bar
@@ -400,13 +400,14 @@ func terminalTopBar(s *State) layout.Node {
 	}
 	// key is one of the bar's keys: its left side, its content, and its
 	// stretch of the divider, from junction on.
-	// Keys are two lines tall, their content on the lower: room from the
-	// terminal's top edge, and a bigger target.
+	// Keys are three lines tall, their content on the middle one: room
+	// from the terminal's top edge and from the divider, and a bigger
+	// target.
 	key := func(id string, w layout.Size, junction string, content layout.Node) layout.Node {
 		return layout.Col{NodeBase: layout.NodeBase{ID: id, W: w, H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
 			layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(barLines)}, Children: []layout.Node{
 				keySide{color: searchBorder},
-				layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), PadTop: barLines - 1}, Children: []layout.Node{content}},
+				layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), PadTop: barLines / 2}, Children: []layout.Node{content}},
 			}},
 			newBarFill(layout.Grow(1), junction).withHeight(1),
 		}}
@@ -433,7 +434,7 @@ func terminalTopBar(s *State) layout.Node {
 		settings.Style.Fg = brand
 	}
 	brandMark := layout.Col{NodeBase: layout.NodeBase{ID: "brand", W: layout.Fixed(termRailWidth), H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
-		layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(barLines), PadLeft: 1, PadTop: barLines - 1, Gap: 1}, Children: []layout.Node{
+		layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(barLines), PadLeft: 1, PadTop: barLines / 2, Gap: 1}, Children: []layout.Node{
 			// The logo a line tall, square on screen, beside the name.
 			picture(s, false, layout.Image{NodeBase: layout.NodeBase{W: layout.Fixed(2), H: layout.Fixed(1)}, Source: logo(), Text: "♫", Fit: layout.ImageContain}),
 			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Fg: brand}},
