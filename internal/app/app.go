@@ -171,6 +171,7 @@ type State struct {
 	// dragValue where (a slider's); sliders are their rects in the last
 	// layout.
 	drag      string
+	swipe     swipe // the sideways swipe in progress
 	dragValue float64
 	// eqFrame steps the terminal's playing-row equalizer (see equalizerBars).
 	eqFrame int
@@ -1753,6 +1754,9 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 			release(s, s.drag, v)
 			s.drag = ""
 		}
+		return
+	}
+	if handleSwipe(s, m, fx) {
 		return
 	}
 	if m.Button == flatte.MouseWheelUp || m.Button == flatte.MouseWheelDown {
