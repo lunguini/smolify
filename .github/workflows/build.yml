@@ -67,6 +67,7 @@ jobs:
             for f in libogg libvorbis flac mpg123; do rm -f "$(brew --prefix $f)"/lib/*.dylib; done
           else
             sudo rm -f /usr/lib/*-linux-gnu/lib{ogg,vorbis,vorbisenc,vorbisfile,FLAC}.so
+            echo 'CGO_LDFLAGS=-lm' >> "$GITHUB_ENV" # static vorbis needs it after
           fi
           echo 'PKG_CONFIG=pkg-config --static' >> "$GITHUB_ENV"
 
