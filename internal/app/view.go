@@ -73,6 +73,18 @@ func card(nb layout.NodeBase, children ...layout.Node) layout.Col {
 	return layout.Col{NodeBase: nb, Children: children}
 }
 
+// panel is one of the screen's sections: a card in a window; in a
+// terminal, where a filled card reads as an empty dark block, a rounded
+// outline, as the search field has, the border taking a cell of padding.
+func panel(g bool, nb layout.NodeBase, children ...layout.Node) layout.Col {
+	if g {
+		return card(nb, children...)
+	}
+	nb.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+	nb.PadTop, nb.PadBottom = max(nb.PadTop-1, 0), max(nb.PadBottom-1, 0)
+	return layout.Col{NodeBase: nb, Children: children}
+}
+
 // View draws the sign-in screen until the player is ready, then the
 // library, the selected playlist, and the player bar.
 func View(s *State, ctx flatte.RenderContext) flatte.Frame {
@@ -91,7 +103,7 @@ func View(s *State, ctx flatte.RenderContext) flatte.Frame {
 			topBar(s, g),
 			layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1), Gap: 1}, Children: []layout.Node{
 				railView(s, g),
-				card(layout.NodeBase{ID: "center-card", W: layout.Grow(1), NoPadding: true}, centerView(s, g, ctx.Width)),
+				panel(g, layout.NodeBase{ID: "center-card", W: layout.Grow(1), NoPadding: true}, centerView(s, g, ctx.Width)),
 			}},
 			playerBar(s, g, ctx.Width),
 		}}
@@ -190,11 +202,11 @@ func railView(s *State, g bool) layout.Node {
 	}
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth), Gap: 1}, Children: []layout.Node{
 		mark,
-		card(layout.NodeBase{PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1, Box: layout.Box{Background: railBg}},
+		panel(g, layout.NodeBase{PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1, Box: layout.Box{Background: railBg}},
 			navItem(s, g, idHome, layout.IconHome, "⌂ ", "Home", pageHome),
 			navItem(s, g, idSearch, layout.IconSearch, "⌕ ", "Search", pageSearch),
 		),
-		card(layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1, Box: layout.Box{Background: railBg}},
+		panel(g, layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1, Box: layout.Box{Background: railBg}},
 			libraryHeader(count, g),
 			layout.Label{},
 			layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1), Gap: 1}, Children: []layout.Node{rows, listBar(s.rail, idRailBar)}},
