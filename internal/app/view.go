@@ -928,8 +928,19 @@ func playerBar(s *State, g bool, width int) layout.Node {
 	if t := s.track; t != nil {
 		title, artists, coverURL = t.Name, strings.Join(t.Artists, ", "), t.Cover
 	}
+	framed := !g && width >= framedPlayerColumns
+	// In a terminal the cover is as tall as the timeline and the controls
+	// under it together: five lines beside framed keys, three beside plain.
+	coverSize := 48
+	switch {
+	case g:
+	case framed:
+		coverSize = 5 * layout.PointsPerLine
+	default:
+		coverSize = 3 * layout.PointsPerLine
+	}
 	now := layout.Row{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth), Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
-		cover(s, coverURL, pick(g, 48, 64), g),
+		cover(s, coverURL, coverSize, g),
 		layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{
 			layout.Label{Text: title, Truncate: true, Style: strong},
 			layout.Label{Text: artists, Truncate: true, Style: secondary},
@@ -962,7 +973,6 @@ func playerBar(s *State, g bool, width int) layout.Node {
 	if !g {
 		skip = layout.TextStyle{}
 	}
-	framed := !g && width >= framedPlayerColumns
 	controls := layout.Row{NodeBase: layout.NodeBase{ID: "player-controls", Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 		layout.NewSpacer(),
 		layout.Button{NodeBase: sq(idShuffle, "Shuffle (s)", 32), Icon: layout.IconShuffle, Label: "⇄", Plain: true, Style: mode(s.shuffle)},
@@ -1041,10 +1051,17 @@ func playerBar(s *State, g bool, width int) layout.Node {
 	volumeWidth := volume.W
 	volume.W = layout.Grow(1)
 	volumeColumn := layout.Col{NodeBase: layout.NodeBase{W: volumeWidth}, Children: []layout.Node{volume, layout.Col{NodeBase: layout.NodeBase{H: layout.Points(pick(g, 36, 32))}}}}
+	if !g { // on the timeline's line, the controls' lines under it free
+		volumeColumn.Children = volumeColumn.Children[:1]
+	}
+	barAlign := layout.AlignCenter
+	if !g { // the cover, timeline, and volume share a top line
+		barAlign = layout.AlignStart
+	}
 	return layout.Col{
 		NodeBase: layout.NodeBase{PadTop: 1},
 		Children: []layout.Node{
-			layout.Row{NodeBase: layout.NodeBase{Gap: 2}, Align: layout.AlignCenter, Children: []layout.Node{
+			layout.Row{NodeBase: layout.NodeBase{Gap: 2}, Align: barAlign, Children: []layout.Node{
 				now,
 				layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{narrowed(g, timeline), controls}},
 				volumeColumn,

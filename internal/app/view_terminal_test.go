@@ -106,3 +106,20 @@ func TestTerminalSettingsRowsStayNarrow(t *testing.T) {
 		t.Fatalf("a setting is %d columns wide on a 200-column screen", w)
 	}
 }
+
+func TestTerminalPlayerPiecesShareTheirLines(t *testing.T) {
+	s := sampleApp().State
+	for _, width := range []int{160, 100} {
+		_, c := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: width}), width, 40)
+		timeline, controls, volume := c.Rects["player-timeline"], c.Rects["player-controls"], c.Rects["player-volume-row"]
+		var cover layout.Rect
+		for _, r := range c.TerminalImages {
+			if r.Rect.Y >= timeline.Y-1 && r.Rect.X < 4 { // the cover, at the left edge
+				cover = r.Rect
+			}
+		}
+		if volume.Y != timeline.Y || cover.Y != timeline.Y || cover.Y+cover.H != controls.Y+controls.H {
+			t.Errorf("width %d: timeline %v controls %v volume %v cover %v", width, timeline, controls, volume, cover)
+		}
+	}
+}
