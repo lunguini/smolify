@@ -72,6 +72,7 @@ func loadBrowseContext(s *State, uri string) {
 		p := s.discovery.Pages[uri]
 		p.Loading = false
 		if err != nil {
+			s.logf("error: browse %s: %v", uri, err)
 			p.Err = err.Error()
 		} else {
 			p.Err = ""

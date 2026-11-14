@@ -1178,3 +1178,23 @@ func TestScrollBarThumbIsHeldWhereGrabbed(t *testing.T) {
 		t.Fatalf("pressing the track's end: offset %d", s.tracks.Offset())
 	}
 }
+
+func TestTransientFailuresStayOffScreen(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"Could not load the library: Get \"https://api\": context deadline exceeded", ""},
+		{"Could not search: context canceled", ""},
+		{"Could not list the tracks: read tcp: i/o timeout", ""},
+		{"Could not play: context deadline exceeded", "Could not play this song. Try again in a moment."},
+		{"Could not play: media is restricted", "Could not play: media is restricted"},
+	} {
+		got, ok := forUser(tc.in)
+		if ok != (tc.want != "") || got != tc.want {
+			t.Errorf("forUser(%q) = %q %v, want %q", tc.in, got, ok, tc.want)
+		}
+	}
+	s := &State{}
+	fail(s, "Could not load Home: context deadline exceeded")
+	if s.status != "" {
+		t.Fatalf("a timeout reached the status line: %q", s.status)
+	}
+}

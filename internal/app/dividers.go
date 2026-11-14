@@ -96,8 +96,8 @@ func (outlineSide) Render(r layout.Rect) string {
 	return lipgloss.NewStyle().Foreground(brand).Render(strings.TrimSuffix(strings.Repeat("│\n", max(r.H, 0)), "\n"))
 }
 
-// roomyRows puts a line of room between rows' entries in a terminal, and
-// outlines the selected entry (see outlineEdge).
+// roomyRows puts a line of room before each of rows' entries in a
+// terminal, and outlines the selected entry (see outlineEdge).
 func roomyRows(rows *layout.Col) {
 	if len(rows.Children) == 0 {
 		return
@@ -129,12 +129,11 @@ func roomyRows(rows *layout.Col) {
 		r.Children = append(inner, outlineSide{})
 		rows.Children[i] = r
 	}
-	out := make([]layout.Node, 0, 2*len(rows.Children))
+	// A line of room before the first entry too, for its top edge.
+	out := make([]layout.Node, 0, 2*len(rows.Children)+1)
 	for i, c := range rows.Children {
-		if i > 0 {
-			out = append(out, outlineEdge{selected: marked[i-1] || marked[i], below: marked[i-1]})
-		}
-		out = append(out, c)
+		above := i > 0 && marked[i-1]
+		out = append(out, outlineEdge{selected: above || marked[i], below: above}, c)
 	}
 	rows.Children, rows.Gap = out, 0
 }

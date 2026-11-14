@@ -570,7 +570,11 @@ func centerView(s *State, g bool, width int) layout.Node {
 	var note layout.Node = layout.Label{}
 	switch {
 	case s.page == pageBrowse && s.discovery.Pages[s.shown].Err != "":
-		note = layout.Row{NodeBase: layout.NodeBase{NoPadding: true, Gap: 1}, Children: []layout.Node{layout.Label{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Text: "Could not load this page: " + s.discovery.Pages[s.shown].Err, Wrap: true, Style: subtle}, layout.Button{NodeBase: layout.NodeBase{ID: "browse-retry"}, Label: "Retry"}}}
+		why := "Could not load this page."
+		if err := s.discovery.Pages[s.shown].Err; !isTransient(err) {
+			why = "Could not load this page: " + err
+		}
+		note = layout.Row{NodeBase: layout.NodeBase{NoPadding: true, Gap: 1}, Children: []layout.Node{layout.Label{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Text: why, Wrap: true, Style: subtle}, layout.Button{NodeBase: layout.NodeBase{ID: "browse-retry"}, Label: "Retry"}}}
 	case g && s.settings.NotifyErrors: // a window tells these as notifications
 	case s.status != "":
 		note = layout.Label{Text: s.status, Style: layout.TextStyle{Fg: danger}}

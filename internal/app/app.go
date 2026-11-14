@@ -449,10 +449,47 @@ func Windowed(app flatte.App[State]) flatte.App[State] {
 // fail reports an error: on screen until the next success, and in a
 // window as a notification (once per distinct message).
 func fail(s *State, msg string) {
+	s.logf("error: %s", msg)
+	msg, ok := forUser(msg)
+	if !ok {
+		return
+	}
 	if s.windowed && s.settings.NotifyErrors && msg != s.status {
 		s.fx.Notify(flatte.Notification{Title: "Smolify", Body: msg})
 	}
 	s.status = msg
+}
+
+// transient are the causes that say only that the network was slow or a
+// request was given up: nothing the user can act on, and the work is
+// retried or asked for again.
+var transient = []string{
+	"context deadline exceeded", "context canceled", "Client.Timeout",
+	"i/o timeout", "connection reset", "connection refused", "no such host",
+	"TLS handshake timeout", "unexpected EOF",
+}
+
+// isTransient reports a message whose cause is transient.
+func isTransient(msg string) bool {
+	for _, t := range transient {
+		if strings.Contains(msg, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// forUser is msg as the user should see it, or false when it is not worth
+// their attention: a failed play says so plainly; any other failure for a
+// transient cause (a background load, which is retried) is not shown.
+func forUser(msg string) (string, bool) {
+	if !isTransient(msg) {
+		return msg, true
+	}
+	if strings.HasPrefix(msg, "Could not play") {
+		return "Could not play this song. Try again in a moment.", true
+	}
+	return "", false
 }
 
 // tell reports a confirmation, as fail does an error.
