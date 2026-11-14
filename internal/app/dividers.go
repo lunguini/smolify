@@ -237,16 +237,16 @@ func (f barFill) Render(r layout.Rect) string {
 	return strings.Join(lines, "\n")
 }
 
-// keySide is a top bar key's left side, one line tall.
+// keySide is a top bar key's left side, down its height.
 type keySide struct {
 	layout.NodeBase
 	color color.Color
 }
 
-func (keySide) Size() (layout.Size, layout.Size) { return layout.Fixed(1), layout.Fixed(1) }
+func (keySide) Size() (layout.Size, layout.Size) { return layout.Fixed(1), layout.Grow(1) }
 
-func (k keySide) Render(layout.Rect) string {
-	return lipgloss.NewStyle().Foreground(k.color).Render("│")
+func (k keySide) Render(r layout.Rect) string {
+	return lipgloss.NewStyle().Foreground(k.color).Render(strings.TrimSuffix(strings.Repeat("│\n", max(r.H, 0)), "\n"))
 }
 
 // withHeight is f h lines tall: its divider on the last.

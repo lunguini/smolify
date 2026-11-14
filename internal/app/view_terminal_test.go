@@ -177,8 +177,10 @@ func TestTerminalTopBarStandsOnTheDivider(t *testing.T) {
 	lines := strings.Split(plain(fr), "\n")
 	// One line of keys under the terminal's top edge, sharing their sides;
 	// the divider under them their bottom edge, crossing the rail's at ┼.
-	if len(lines) < 3 || strings.Count(lines[1], "┴") != 3 || []rune(lines[1])[termRailWidth] != '┼' ||
-		[]rune(lines[0])[termRailWidth] != '│' || []rune(lines[2])[termRailWidth] != '│' || strings.Contains(lines[0], "╭") {
-		t.Fatalf("the keys do not share the borders:\n%s", strings.Join(lines[:3], "\n"))
+	d := barLines // the divider's line
+	if len(lines) < d+2 || strings.Count(lines[d], "┴") != 3 || []rune(lines[d])[termRailWidth] != '┼' ||
+		[]rune(lines[0])[termRailWidth] != '│' || []rune(lines[d+1])[termRailWidth] != '│' || strings.Contains(lines[0], "╭") ||
+		!strings.Contains(lines[d-1], "Settings") {
+		t.Fatalf("the keys do not share the borders:\n%s", strings.Join(lines[:d+2], "\n"))
 	}
 }
