@@ -12,25 +12,30 @@ Work in progress. Requires Spotify Premium. Not affiliated with Spotify.
 
 ## Install
 
-With Go 1.26 or later, until there are Homebrew and release builds:
+macOS and Linux, with [Homebrew](https://brew.sh):
 
 ```bash
-brew install libogg libvorbis flac mpg123   # audio codecs (cgo)
-go install github.com/lunguini/smolify/cmd/smolify@latest
+brew install --cask lunguini/tap/smolify
 smolify          # in the terminal
 smolify -gui     # in a window (macOS)
 ```
 
-`go install` puts `smolify` in `$(go env GOPATH)/bin` (usually `~/go/bin`);
-add that to your `PATH` if the command is not found. Run the same
-`go install` again to update.
+`brew upgrade --cask smolify` updates it.
 
-While the repository is private, Go has to fetch it with your GitHub access
-instead of the public module proxy:
+Or download a build for macOS, Linux or Windows from the
+[releases](https://github.com/lunguini/smolify/releases/latest). The audio
+codecs are built in; Linux builds need glibc 2.39 or later (Ubuntu 24.04 and
+newer), with libmpg123 and ALSA installed. The window (`-gui`) is macOS only.
+
+With Go 1.26 or later, from source:
 
 ```bash
-GOPRIVATE=github.com/lunguini go install github.com/lunguini/smolify/cmd/smolify@latest
+brew install libogg libvorbis flac mpg123   # audio codecs (cgo)
+go install github.com/lunguini/smolify/cmd/smolify@latest
 ```
+
+`go install` puts `smolify` in `$(go env GOPATH)/bin` (usually `~/go/bin`);
+add that to your `PATH` if the command is not found.
 
 On first run, Smolify shows a code: open spotify.com/pair and enter it to
 sign in.
