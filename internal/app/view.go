@@ -302,12 +302,9 @@ func brandMark(g bool) layout.Node {
 }
 
 // framedPlayerColumns is the terminal width from which the player's
-// controls are framed buttons three rows tall; narrower, single glyphs.
+// controls are framed buttons with their icons drawn as shapes; narrower,
+// single glyphs.
 const framedPlayerColumns = 120
-
-// wordedPlayerColumns is the terminal width from which the player's
-// Shuffle and Repeat controls carry words.
-const wordedPlayerColumns = 140
 
 // worded gives a terminal icon button a word after its glyph: one cell
 // of symbol is hard to see and to hit. A GUI draws the icon alone.
@@ -877,37 +874,30 @@ func playerBar(s *State, g bool, width int) layout.Node {
 	if !g {
 		skip = layout.TextStyle{}
 	}
-	// Words fit beside the controls only in a wide terminal.
-	word := func(b layout.Button, w string) layout.Button {
-		if width < wordedPlayerColumns {
-			return b
-		}
-		return worded(b, g, w)
-	}
 	framed := !g && width >= framedPlayerColumns
 	controls := layout.Row{NodeBase: layout.NodeBase{ID: "player-controls", Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 		layout.NewSpacer(),
-		word(layout.Button{NodeBase: sq(idShuffle, "Shuffle (s)", 32), Icon: layout.IconShuffle, Label: "⇄", Plain: true, Style: mode(s.shuffle)}, "Shuffle"),
+		layout.Button{NodeBase: sq(idShuffle, "Shuffle (s)", 32), Icon: layout.IconShuffle, Label: "⇄", Plain: true, Style: mode(s.shuffle)},
 		layout.Button{NodeBase: sq(idPrev, "Previous (p)", 32), Icon: layout.IconPrevious, Label: "⏮", Plain: true, Style: skip},
 		play,
 		layout.Button{NodeBase: sq(idNext, "Next (n)", 32), Icon: layout.IconNext, Label: "⏭", Plain: true, Style: skip},
-		word(layout.Button{NodeBase: sq(idRepeat, repeatTip(s.repeat), 32), Icon: repeatIcon(s.repeat), Label: repeatLabel(s.repeat), Plain: true, Style: mode(s.repeat.Context || s.repeat.Track)}, "Repeat"),
+		layout.Button{NodeBase: sq(idRepeat, repeatTip(s.repeat), 32), Icon: repeatIcon(s.repeat), Label: repeatLabel(s.repeat), Plain: true, Style: mode(s.repeat.Context || s.repeat.Track)},
 		layout.NewSpacer(),
 	}}
 
 	if framed {
 		controls.Gap = 2
-		// A terminal glyph is one cell: a frame around each control makes
-		// it a target three rows tall, the play button's lit like a key.
+		// A terminal glyph is one cell: framed with room inside, Flatte
+		// draws each icon's shape there instead (as a picture where the
+		// terminal shows them), the play button's lit like a key.
 		for i, c := range controls.Children {
 			b, ok := c.(layout.Button)
 			if !ok {
 				continue
 			}
-			b.H, b.PadLeft, b.PadRight = layout.Fixed(3), 1, 1
-			if b.W.Kind == layout.SizePoints {
-				b.W = layout.Auto()
-			}
+			// A 6×3 square inside: three lines, so terminals without
+			// pictures draw the shape in half-blocks too.
+			b.W, b.H = layout.Fixed(8), layout.Fixed(5)
 			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
 			if b.ID == idPlay {
 				b.Box.BorderColor, b.Default = brand, false

@@ -48,12 +48,12 @@ func TestTerminalSearchCaretBlinks(t *testing.T) {
 // and Repeat; a narrow one keeps single glyphs so they all fit.
 func TestTerminalPlayerControlsGrowWithWidth(t *testing.T) {
 	s := sampleApp().State
-	wide := layout.Compose(playerBar(s, false, 160), 160, 6).Frame
-	if n := strings.Count(wide, "╭"); n < 5 || !strings.Contains(wide, "Shuffle") || !strings.Contains(wide, "Repeat") {
-		t.Errorf("wide player: %d frames\n%s", n, flatest.CleanFrame(wide))
+	wide := layout.Compose(playerBar(s, false, 160), 160, 8)
+	if n := strings.Count(wide.Frame, "╭"); n < 5 || len(wide.TerminalImages) < 5 {
+		t.Errorf("wide player: %d frames, %d icon pictures\n%s", n, len(wide.TerminalImages), flatest.CleanFrame(wide.Frame))
 	}
-	narrow := layout.Compose(playerBar(s, false, 100), 100, 6).Frame
-	if strings.Contains(narrow, "╭") || strings.Contains(narrow, "Shuffle") {
-		t.Errorf("narrow player is framed or worded:\n%s", flatest.CleanFrame(narrow))
+	narrow := layout.Compose(playerBar(s, false, 100), 100, 8)
+	if strings.Contains(narrow.Frame, "╭") || !strings.Contains(flatest.CleanFrame(narrow.Frame), "⇄") {
+		t.Errorf("narrow player is framed or lost its glyphs:\n%s", flatest.CleanFrame(narrow.Frame))
 	}
 }
