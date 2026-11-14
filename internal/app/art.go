@@ -58,6 +58,10 @@ var blankArt = func() image.Image {
 // artPixels is smolArt's size: as large as a fetched header cover.
 const artPixels = coverPixels
 
+// heartMiddle is the heart curve's vertical middle, between its tip (-1)
+// and the top of its lobes (about 1.236).
+const heartMiddle = 0.118
+
 // likedArt is Liked Songs' cover as one picture, for terminals: a white
 // heart on smolArt, about half its size, edges antialiased.
 var likedArt = sync.OnceValue(func() image.Image {
@@ -70,9 +74,11 @@ var likedArt = sync.OnceValue(func() image.Image {
 			for sy := range samples {
 				for sx := range samples {
 					// The heart curve (x²+y²-1)³ - x²y³ ≤ 0, scaled to about
-					// middle half and lifted to sit centered.
+					// the middle half. It spans y from -1 (its tip) to about
+					// 1.236 (its lobes), so its middle, y≈0.118, is put at
+					// the picture's center.
 					u := ((float64(x)+(float64(sx)+0.5)/samples)/n - 0.5) * 4.2
-					v := (0.47 - (float64(y)+(float64(sy)+0.5)/samples)/n) * 4.2
+					v := (0.5 + heartMiddle/4.2 - (float64(y)+(float64(sy)+0.5)/samples)/n) * 4.2
 					if a := u*u + v*v - 1; a*a*a-u*u*v*v*v <= 0 {
 						inside++
 					}

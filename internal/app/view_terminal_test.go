@@ -4,12 +4,14 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatest"
 	"github.com/lunguini/flatte/flatui/layout"
 
 	"github.com/lunguini/smolify/internal/model"
+	"github.com/lunguini/smolify/internal/player"
 )
 
 // In a terminal the search field is framed, its frame lights up in the
@@ -182,5 +184,55 @@ func TestTerminalTopBarStandsOnTheDivider(t *testing.T) {
 		[]rune(lines[0])[termRailWidth] != '│' || []rune(lines[d+1])[termRailWidth] != '│' || strings.Contains(lines[0], "╭") ||
 		!strings.Contains(lines[d-2], "Settings") {
 		t.Fatalf("the keys do not share the borders:\n%s", strings.Join(lines[:d+2], "\n"))
+	}
+}
+
+func TestRowHeartLikesWithoutPlaying(t *testing.T) {
+	d, f := ready(t)
+	long := player.Listing{URI: "spotify:playlist:a", Ready: true, Length: 3, Cached: 3}
+	for i := range 3 {
+		long.Tracks = append(long.Tracks, player.Track{URI: "spotify:track:" + strconv.Itoa(i), Name: "Song " + strconv.Itoa(i), Duration: time.Minute})
+	}
+	f.listings[long.URI] = long
+	event(d, player.Ready{})
+	s := d.State()
+	fr := d.Frame()
+	if !strings.Contains(plain(fr), "♡") {
+		t.Fatalf("no empty heart on an unliked song:\n%s", plain(fr))
+	}
+	_, comp := flatte.ComposeFrame(fr, 100, 30)
+	uri := s.listings[s.shown].Tracks[1].URI
+	r, ok := comp.Rects[idRowLike+uri]
+	if !ok {
+		t.Fatal("no heart target on the row")
+	}
+	f.calls = nil
+	cursor := s.tracks.Cursor()
+	d.Send(flatte.MouseEvent{X: r.X, Y: r.Y, Button: flatte.MouseLeft, Action: flatte.MousePress})
+	d.Settle()
+	if !s.liked[uri] || s.tracks.Cursor() != cursor {
+		t.Fatalf("liked %v, cursor %d (was %d)", s.liked[uri], s.tracks.Cursor(), cursor)
+	}
+	for _, c := range f.calls {
+		if strings.HasPrefix(c, "play") {
+			t.Fatalf("liking played: %v", f.calls)
+		}
+	}
+}
+
+func TestLikedArtHeartIsCentered(t *testing.T) {
+	im := likedArt()
+	b := im.Bounds()
+	top, bottom := b.Max.Y, b.Min.Y
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if r, g, bl, _ := im.At(x, y).RGBA(); r>>8 > 0xf0 && g>>8 > 0xf0 && bl>>8 > 0xf0 { // the white heart
+				top, bottom = min(top, y), max(bottom, y)
+			}
+		}
+	}
+	above, below := top-b.Min.Y, b.Max.Y-1-bottom
+	if d := above - below; d < -2 || d > 2 {
+		t.Fatalf("heart from line %d to %d: %d above, %d below", top, bottom, above, below)
 	}
 }

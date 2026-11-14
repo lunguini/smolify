@@ -877,7 +877,7 @@ func trackRow(s *State, i int, t model.Track, g, dateColumn bool) layout.Node {
 	if dateColumn {
 		date = layout.Label{NodeBase: layout.NodeBase{Tooltip: addedDateTooltip(t.AddedAt)}, Text: addedDate(t.AddedAt), Style: subtle}
 	}
-	row := s.trackCells(g, dateColumn, num, thumb(s, t.Cover, 32, g), title, album, date, heart(s.liked[t.URI], ""), layout.Label{Text: clock(t.Duration), Style: subtle})
+	row := s.trackCells(g, dateColumn, num, thumb(s, t.Cover, 32, g), title, album, date, rowHeart(s.liked[t.URI], t.URI), layout.Label{Text: clock(t.Duration), Style: subtle})
 	if playing || requested {
 		row.Box = layout.Box{Background: playingBg, Interactive: true, Round: true, InsetY: rowGap}
 	}
@@ -919,6 +919,25 @@ func artistLine(t model.Track, row int, fill bool) layout.Node {
 
 // heart marks a liked track. With an id it is the like control, an outline
 // when not liked.
+// idRowLike prefixes a song row's heart: the track's URI follows, so a
+// click likes or unlikes that song without playing or selecting it.
+const idRowLike = "row-like:"
+
+// rowHeart is a song row's heart: filled when liked, empty when not,
+// either a click away from the other.
+func rowHeart(liked bool, uri string) layout.Node {
+	icon := layout.Icon{Name: layout.IconHeartOutline, Text: "♡ ", Style: subtle}
+	tip := "Save to Liked Songs"
+	if liked {
+		icon = layout.Icon{Name: layout.IconHeart, Text: "♥ ", Style: layout.TextStyle{Fg: brand}}
+		tip = "Remove from Liked Songs"
+	}
+	if !strings.HasPrefix(uri, "spotify:track:") {
+		return layout.Icon{Text: "  "}
+	}
+	return layout.Row{NodeBase: layout.NodeBase{ID: idRowLike + uri, Tooltip: tip, W: layout.Fixed(2)}, Children: []layout.Node{icon}}
+}
+
 func heart(liked bool, id string) layout.Node {
 	if id == "" {
 		if liked {

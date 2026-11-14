@@ -1810,6 +1810,15 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	if homeClick(s, m.Target) {
 		return
 	}
+	if uri, ok := strings.CutPrefix(m.Target, idRowLike); ok {
+		for _, t := range displayListing(s, s.listings[s.shown]).Tracks {
+			if t.URI == uri {
+				setLiked(s, t, !s.liked[uri])
+				break
+			}
+		}
+		return
+	}
 	if m.Target == "browse-retry" {
 		retryBrowse(s)
 		return
