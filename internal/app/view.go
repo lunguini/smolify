@@ -449,8 +449,8 @@ func terminalTopBar(s *State) layout.Node {
 		brandMark,
 		// About square on screen (twice as many columns inside as lines),
 		// odd inside so the arrow centers.
-		key(idBack, layout.Fixed(historyColumns), "┼", history("←", len(s.back) > 0)),
-		key(idForward, layout.Fixed(historyColumns), "┴", history("→", len(s.forward) > 0)),
+		key(idBack, layout.Fixed(historyColumns), "┼", history("❮", len(s.back) > 0)),
+		key(idForward, layout.Fixed(historyColumns), "┴", history("❯", len(s.forward) > 0)),
 		key(idSearchBox, layout.Grow(1), "┴", search),
 		key(idSettings, layout.Fixed(14), "┴", centered(settings)),
 	}}
