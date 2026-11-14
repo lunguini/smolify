@@ -78,6 +78,7 @@ jobs:
           echo 'EXTLDFLAGS=-static' >> "$GITHUB_ENV"
           echo 'PKG_CONFIG=pkgconf --static' >> "$GITHUB_ENV"
           echo 'CGO_CFLAGS=-DFLAC__NO_DLL' >> "$GITHUB_ENV"
+          echo 'CGO_LDFLAGS=-lshlwapi' >> "$GITHUB_ENV" # static mpg123 needs it, unlisted
 
       - name: Build
         env:
