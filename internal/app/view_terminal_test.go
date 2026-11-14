@@ -175,7 +175,10 @@ func TestTerminalTopBarStandsOnTheDivider(t *testing.T) {
 	s := sampleApp().State
 	fr, _ := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 160}), 160, 40)
 	lines := strings.Split(plain(fr), "\n")
-	if len(lines) < 3 || strings.Count(lines[2], "┴") < 8 || []rune(lines[2])[termRailWidth] != '┬' {
-		t.Fatalf("the keys do not join the divider:\n%s", strings.Join(lines[:3], "\n"))
+	// One line of keys under the terminal's top edge, sharing their sides;
+	// the divider under them their bottom edge, crossing the rail's at ┼.
+	if len(lines) < 3 || strings.Count(lines[1], "┴") != 3 || []rune(lines[1])[termRailWidth] != '┼' ||
+		[]rune(lines[0])[termRailWidth] != '│' || []rune(lines[2])[termRailWidth] != '│' || strings.Contains(lines[0], "╭") {
+		t.Fatalf("the keys do not share the borders:\n%s", strings.Join(lines[:3], "\n"))
 	}
 }

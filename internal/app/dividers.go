@@ -205,9 +205,8 @@ func equalizerBars(f int, playing bool) string {
 	return b.String()
 }
 
-// The terminal's top bar sits on the divider under it: each framed key's
-// bottom edge is that divider (┴────┴), so the bar and the line are one
-// border rather than boxes above a rule.
+// The terminal's top bar shares its borders with the divider under it and
+// the terminal's edges (see terminalTopBar).
 
 // barFill is a stretch of the top bar with nothing framed in it: blank
 // above, its share of the divider on its last line (from tee on, when set).
@@ -238,28 +237,7 @@ func (f barFill) Render(r layout.Rect) string {
 	return strings.Join(lines, "\n")
 }
 
-// keyEdge is a framed key's top edge (╭──╮), or its bottom edge where it
-// joins the divider (┴──┴).
-type keyEdge struct {
-	layout.NodeBase
-	bottom bool
-	color  color.Color
-}
-
-func (keyEdge) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
-
-func (e keyEdge) Render(r layout.Rect) string {
-	if r.W < 2 {
-		return strings.Repeat(" ", max(r.W, 0))
-	}
-	left, right, c := "╭", "╮", e.color
-	if e.bottom {
-		left, right, c = "┴", "┴", searchBorder
-	}
-	return lipgloss.NewStyle().Foreground(c).Render(left + strings.Repeat("─", r.W-2) + right)
-}
-
-// keySide is a framed key's side, one line tall.
+// keySide is a top bar key's left side, one line tall.
 type keySide struct {
 	layout.NodeBase
 	color color.Color
@@ -269,20 +247,6 @@ func (keySide) Size() (layout.Size, layout.Size) { return layout.Fixed(1), layou
 
 func (k keySide) Render(layout.Rect) string {
 	return lipgloss.NewStyle().Foreground(k.color).Render("│")
-}
-
-// barKey frames content as a key of the top bar, w wide, lit in the accent
-// when lit; clicks anywhere on it target id.
-func barKey(id string, w layout.Size, lit bool, content layout.Node) layout.Node {
-	c := color.Color(searchBorder)
-	if lit {
-		c = brand
-	}
-	return layout.Col{NodeBase: layout.NodeBase{ID: id, W: w, H: layout.Fixed(3)}, Children: []layout.Node{
-		keyEdge{color: c},
-		layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(1)}, Children: []layout.Node{keySide{color: c}, content, keySide{color: c}}},
-		keyEdge{bottom: true},
-	}}
 }
 
 // withHeight is f h lines tall: its divider on the last.
