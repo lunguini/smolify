@@ -1146,3 +1146,34 @@ func TestTerminalShowsTheSelectedRow(t *testing.T) {
 		t.Fatalf("no selection background in the terminal frame")
 	}
 }
+
+func TestScrollBarThumbIsHeldWhereGrabbed(t *testing.T) {
+	s := &State{}
+	s.tracks.SetCount(20)
+	s.tracks.SetHeight(8)
+	s.tracks.ScrollTo(6)
+	const height = 16
+	pos, size, _ := listBar(s.tracks, idTrackBar).Thumb(height)
+	if size < 2 {
+		t.Fatalf("thumb %d lines", size)
+	}
+	grabBar(s, idTrackBar, pos, height) // the thumb's first line
+	if s.tracks.Offset() != 6 {
+		t.Fatalf("pressing the thumb moved the list to %d", s.tracks.Offset())
+	}
+	last := 6
+	for dy := 1; dy <= 3; dy++ {
+		dragBar(s, idTrackBar, pos+dy, height)
+		if s.tracks.Offset() < last {
+			t.Fatalf("dragging down %d lines scrolled up to %d", dy, s.tracks.Offset())
+		}
+		last = s.tracks.Offset()
+	}
+	if last <= 6 {
+		t.Fatal("dragging the thumb down did not scroll")
+	}
+	grabBar(s, idTrackBar, height-1, height) // the track below: jump there
+	if s.tracks.Offset() != 12 {
+		t.Fatalf("pressing the track's end: offset %d", s.tracks.Offset())
+	}
+}

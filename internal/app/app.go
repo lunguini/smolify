@@ -172,7 +172,10 @@ type State struct {
 	// layout.
 	drag      string
 	dragValue float64
-	sliders   map[string]layout.Rect
+	// dragGrab is the line of a scroll bar's thumb the pointer holds, so
+	// the thumb follows the pointer from where it was grabbed.
+	dragGrab int
+	sliders  map[string]layout.Rect
 
 	status string // the last error
 	notice string // the last confirmation ("Added to queue")
@@ -1681,7 +1684,7 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 		r := s.sliders[s.drag]
 		switch m.Action {
 		case flatte.MouseMotion:
-			scrollBar(s, s.drag, m.Y-r.Y, r.H)
+			dragBar(s, s.drag, m.Y-r.Y, r.H)
 		case flatte.MouseRelease:
 			s.drag = ""
 		}
@@ -1839,7 +1842,7 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 			s.focus = paneTracks
 		}
 		s.drag = m.Target
-		scrollBar(s, m.Target, m.Y-m.TargetRect.Y, m.TargetRect.H)
+		grabBar(s, m.Target, m.Y-m.TargetRect.Y, m.TargetRect.H)
 	case idProgress, idVolume:
 		focusPlayer(s)
 		if m.Target == idProgress && s.track == nil {
@@ -1908,6 +1911,28 @@ func listBar(l flatui.List, id string) layout.ScrollBar {
 func scrollBar(s *State, bar string, y, height int) {
 	l := s.list(bar)
 	l.Scroll(listBar(*l, bar).OffsetAt(y, height) - l.Offset())
+}
+
+// grabBar starts a drag of bar at line y of its height lines: on the
+// thumb, holding it where it was pressed; on the track, the thumb jumps to
+// center on the pointer and is held there.
+func grabBar(s *State, bar string, y, height int) {
+	pos, size, ok := listBar(*s.list(bar), bar).Thumb(height)
+	if ok && y >= pos && y < pos+size {
+		s.dragGrab = y - pos
+		return
+	}
+	s.dragGrab = size / 2
+	scrollBar(s, bar, y, height)
+}
+
+// dragBar moves bar's thumb so the line grabbed is at line y.
+func dragBar(s *State, bar string, y, height int) {
+	_, size, ok := listBar(*s.list(bar), bar).Thumb(height)
+	if !ok {
+		return
+	}
+	scrollBar(s, bar, y-s.dragGrab+size/2, height)
 }
 
 // release acts on a slider let go at value v.

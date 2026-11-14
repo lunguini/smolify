@@ -73,16 +73,27 @@ func card(nb layout.NodeBase, children ...layout.Node) layout.Col {
 	return layout.Col{NodeBase: nb, Children: children}
 }
 
-// panel is one of the screen's sections: a card in a window; in a
-// terminal, where a filled card reads as an empty dark block, a rounded
-// outline, as the search field has, the border taking a cell of padding.
-func panel(g bool, nb layout.NodeBase, children ...layout.Node) layout.Col {
-	if g {
-		return card(nb, children...)
+// navLines is the terminal rail's Home and Search section's height: a
+// line of room, the two items, and a line of room.
+const navLines = 4
+
+// terminalRoot is the signed-in screen in a terminal: sections split by
+// single lines that run to the terminal's edges, which frame the whole.
+func terminalRoot(s *State, width int) layout.Node {
+	pad := func(n layout.Node) layout.Node {
+		return layout.Col{NodeBase: layout.NodeBase{PadLeft: 1, PadRight: 1}, Children: []layout.Node{n}}
 	}
-	nb.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
-	nb.PadTop, nb.PadBottom = max(nb.PadTop-1, 0), max(nb.PadBottom-1, 0)
-	return layout.Col{NodeBase: nb, Children: children}
+	return layout.Col{Children: []layout.Node{
+		pad(topBar(s, false)),
+		newHRule(map[int]string{railWidth: "┬"}),
+		layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{
+			railView(s, false),
+			newVRule(map[int]string{navLines: "┤"}),
+			layout.Col{NodeBase: layout.NodeBase{ID: "center-card", W: layout.Grow(1)}, Children: []layout.Node{centerView(s, false, width)}},
+		}},
+		newHRule(map[int]string{railWidth: "┴"}),
+		pad(playerBar(s, false, width)),
+	}}
 }
 
 // View draws the sign-in screen until the player is ready, then the
@@ -103,10 +114,13 @@ func View(s *State, ctx flatte.RenderContext) flatte.Frame {
 			topBar(s, g),
 			layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1), Gap: 1}, Children: []layout.Node{
 				railView(s, g),
-				panel(g, layout.NodeBase{ID: "center-card", W: layout.Grow(1), NoPadding: true}, centerView(s, g, ctx.Width)),
+				card(layout.NodeBase{ID: "center-card", W: layout.Grow(1), NoPadding: true}, centerView(s, g, ctx.Width)),
 			}},
 			playerBar(s, g, ctx.Width),
 		}}
+		if !g {
+			frame.Root = terminalRoot(s, ctx.Width)
+		}
 		// Pictures are a terminal's choice; the half-blocks under them
 		// stand alone when the user prefers them (and with images off,
 		// covers carry no picture at all).
@@ -196,21 +210,26 @@ func railView(s *State, g bool) layout.Node {
 	if n := len(lib); n > 0 {
 		count = strconv.Itoa(n)
 	}
-	var mark layout.Node = layout.Col{}
-	if g { // a terminal names the app in the top bar instead
-		mark = brandMark(g)
+	nav := []layout.Node{
+		navItem(s, g, idHome, layout.IconHome, "⌂ ", "Home", pageHome),
+		navItem(s, g, idSearch, layout.IconSearch, "⌕ ", "Search", pageSearch),
+	}
+	library := []layout.Node{
+		libraryHeader(count, g),
+		layout.Label{},
+		layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1), Gap: 1}, Children: []layout.Node{rows, listBar(s.rail, idRailBar)}},
+	}
+	if !g { // the app's name is in the top bar; a line splits the sections
+		return layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth)}, Children: []layout.Node{
+			layout.Col{NodeBase: layout.NodeBase{H: layout.Fixed(navLines), PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1}, Children: nav},
+			newHRule(nil),
+			layout.Col{NodeBase: layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1}, Children: library},
+		}}
 	}
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth), Gap: 1}, Children: []layout.Node{
-		mark,
-		panel(g, layout.NodeBase{PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1, Box: layout.Box{Background: railBg}},
-			navItem(s, g, idHome, layout.IconHome, "⌂ ", "Home", pageHome),
-			navItem(s, g, idSearch, layout.IconSearch, "⌕ ", "Search", pageSearch),
-		),
-		panel(g, layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1, Box: layout.Box{Background: railBg}},
-			libraryHeader(count, g),
-			layout.Label{},
-			layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1), Gap: 1}, Children: []layout.Node{rows, listBar(s.rail, idRailBar)}},
-		),
+		brandMark(g),
+		card(layout.NodeBase{PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1, Box: layout.Box{Background: railBg}}, nav...),
+		card(layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1, Box: layout.Box{Background: railBg}}, library...),
 	}}
 }
 
