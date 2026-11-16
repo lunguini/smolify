@@ -196,6 +196,7 @@ type State struct {
 	applyingAudio               bool
 	settingQuality              flatui.Select
 	settingCrossfade            flatui.Select
+	settingBackend              flatui.Select
 	settingsStore               SettingsStore
 	deviceName                  flatui.TextField
 	settingCursor               int
@@ -1771,7 +1772,7 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 			}
 			return // an open popup owns the wheel, including clicks outside it
 		}
-		if s.settingQuality.IsOpen() || s.settingCrossfade.IsOpen() {
+		if s.settingQuality.IsOpen() || s.settingCrossfade.IsOpen() || s.settingBackend.IsOpen() {
 			switch {
 			case s.settingQuality.IsOpen() && strings.HasPrefix(m.Target, setQuality+":select:option:"):
 				if up {
@@ -1784,6 +1785,12 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 					s.settingCrossfade.MoveUp()
 				} else {
 					s.settingCrossfade.MoveDown()
+				}
+			case s.settingBackend.IsOpen() && strings.HasPrefix(m.Target, setBackend+":select:option:"):
+				if up {
+					s.settingBackend.MoveUp()
+				} else {
+					s.settingBackend.MoveDown()
 				}
 			}
 			return // don't scroll settings under an open dropdown
@@ -1807,6 +1814,9 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	}
 	if !strings.HasPrefix(m.Target, setCrossfade+":select") {
 		s.settingCrossfade.Close()
+	}
+	if !strings.HasPrefix(m.Target, setBackend+":select") {
+		s.settingBackend.Close()
 	}
 	if settingClicked(s, m.Target) {
 		return

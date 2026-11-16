@@ -25,13 +25,14 @@ import (
 // fake is a Backend that records requests: the ones that change things in
 // calls, track listings and liked lookups in reads.
 type fake struct {
-	calls     []string
-	reads     []string
-	playlists []player.Playlist
-	status    player.Status
-	fail      error
-	listings  map[string]player.Listing
-	liked     map[string]bool
+	calls      []string
+	audioCalls []player.Audio
+	reads      []string
+	playlists  []player.Playlist
+	status     player.Status
+	fail       error
+	listings   map[string]player.Listing
+	liked      map[string]bool
 
 	// recent is the recently played lists; the Web API's results by
 	// query, and its failure.
@@ -42,6 +43,7 @@ type fake struct {
 
 func (f *fake) Configure(_ context.Context, a player.Audio) error {
 	f.calls = append(f.calls, fmt.Sprintf("configure %d %v %v %v", a.Bitrate, a.Normalise, a.Crossfade, a.Autoplay))
+	f.audioCalls = append(f.audioCalls, a)
 	return f.fail
 }
 func (f *fake) SetDeviceName(_ context.Context, name string) error {
