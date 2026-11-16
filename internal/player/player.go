@@ -1,7 +1,7 @@
 //go:build !js || !wasm
 
 // Package player embeds go-librespot as Smolify's player: a Spotify Connect
-// device that plays through the Mac's audio output, driven in-process —
+// device that plays through the OS's audio output, driven in-process —
 // requests go to it over a channel and its events come back on Events, with
 // no HTTP server. It has no UI types.
 package player
@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -157,6 +158,11 @@ func (p *Player) launch() error {
 		}
 		p.mu.Unlock()
 	}
+	audioBackend, err := model.ResolveAudioBackend(runtime.GOOS, opts.Audio.Backend, os.Getenv(model.AudioBackendEnv))
+	if err != nil {
+		cancel()
+		return err
+	}
 	newApp := p.newApp
 	if newApp == nil {
 		newApp = func(o *daemon.Options) (sessionApp, error) { return daemon.New(o) }
@@ -168,7 +174,8 @@ func (p *Player) launch() error {
 		Config: &daemon.Config{
 			DeviceName:            opts.DeviceName,
 			DeviceType:            "computer",
-			AudioBackend:          "audio-toolbox",
+			AudioBackend:          audioBackend,
+			AudioDevice:           "default",
 			Bitrate:               audioBitrate(opts.Audio),
 			NormalisationDisabled: !opts.Audio.Normalise,
 			CrossfadeDuration:     int(opts.Audio.Crossfade / time.Millisecond),

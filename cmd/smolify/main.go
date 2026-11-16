@@ -1,7 +1,7 @@
 //go:build !js || !wasm
 
 // Command smolify is a small, fast Spotify client: in the terminal, or in a
-// native window with -gui on supported platforms. It plays through the Mac's
+// native window with -gui on supported platforms. It plays through the system
 // audio output (Spotify Premium required).
 package main
 

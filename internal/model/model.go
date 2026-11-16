@@ -10,6 +10,9 @@ import (
 // Audio is how a player plays. Browser players may ignore settings they do
 // not expose.
 type Audio struct {
+	// Backend is the output driver, or AudioBackendAuto (or "") for the OS
+	// default. Native players only.
+	Backend   string
 	Bitrate   int
 	Normalise bool
 	Crossfade time.Duration

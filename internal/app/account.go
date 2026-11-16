@@ -40,6 +40,7 @@ func resetAccount(s *State) {
 	fresh.fx, fresh.windowed, fresh.away = s.fx, s.windowed, s.away
 	fresh.playerEventsDone = s.playerEventsDone
 	fresh.settings, fresh.settingsStore = s.settings, s.settingsStore
+	initAudioSettings(fresh)
 	fresh.activeAudio = s.activeAudio
 	fresh.compact, fresh.searchDelay = s.compact, s.searchDelay
 	fresh.deviceName = flatui.TextField{Value: s.settings.DeviceName, Cursor: len(s.settings.DeviceName)}

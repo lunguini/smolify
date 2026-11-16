@@ -51,7 +51,7 @@ func TestWindowSnapshot(t *testing.T) {
 	s.page, s.focus = pageSettings, paneSettings
 	s.settings.Bitrate = 160 // staged so the explicit Apply state is visible
 	s.settingQuality.Select(1)
-	s.settingCursor = 2
+	s.settingCursor = 3
 	if img, err := window.Snapshot(a, snapOptions(110, 40), 2); err == nil {
 		if f, err := os.Create(filepath.Join(dir, "smolify-settings.png")); err == nil {
 			png.Encode(f, img)

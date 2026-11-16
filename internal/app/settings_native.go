@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,6 +34,7 @@ func LoadSettings(path string) (Settings, error) {
 	if strings.TrimSpace(st.DeviceName) == "" {
 		st.DeviceName = DefaultSettings().DeviceName
 	}
+	st = normalizeAudioBackend(st, runtime.GOOS)
 	return st, nil
 }
 

@@ -4,6 +4,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"context"
 	"errors"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +35,9 @@ type Settings struct {
 	Normalise bool `json:"normalise"`
 	Crossfade int  `json:"crossfade_seconds"`
 	Autoplay  bool `json:"autoplay"`
+	// AudioBackend is the output driver: model.AudioBackendAuto, or one of
+	// model.AudioBackendOptions for this OS.
+	AudioBackend string `json:"audio_backend"`
 
 	DeviceName string `json:"device_name"`
 	Compact    bool   `json:"compact_rows"`
@@ -52,17 +57,18 @@ const (
 
 // DefaultSettings are a first launch's settings.
 func DefaultSettings() Settings {
-	return Settings{NotifyErrors: true, NotifyTracks: true, Bitrate: 320, Normalise: true, Autoplay: true, DeviceName: "Smolify"}
+	return Settings{NotifyErrors: true, NotifyTracks: true, Bitrate: 320, Normalise: true, Autoplay: true, AudioBackend: model.AudioBackendAuto, DeviceName: "Smolify"}
 }
 
 // Audio is how the settings ask the player to play.
 func (st Settings) Audio() model.Audio {
-	return model.Audio{Bitrate: st.Bitrate, Normalise: st.Normalise, Crossfade: time.Duration(st.Crossfade) * time.Second, Autoplay: st.Autoplay}
+	return model.Audio{Backend: st.AudioBackend, Bitrate: st.Bitrate, Normalise: st.Normalise, Crossfade: time.Duration(st.Crossfade) * time.Second, Autoplay: st.Autoplay}
 }
 
 // WithSettingsStore installs host storage and applies the loaded settings.
 func WithSettingsStore(app flatte.App[State], store SettingsStore, st Settings) flatte.App[State] {
 	s := app.State
+	st = normalizeAudioBackend(st, runtime.GOOS)
 	s.settings, s.settingsStore, s.compact = st, store, st.Compact
 	s.activeAudio = st.Audio()
 	initAudioSettings(s)
@@ -75,6 +81,57 @@ func initAudioSettings(s *State) {
 	s.settingQuality.Select(pickOf(qualities, s.settings.Bitrate))
 	s.settingCrossfade.SetOptions([]string{"Off", "2 seconds", "5 seconds", "10 seconds"})
 	s.settingCrossfade.Select(pickOf(crossfades, s.settings.Crossfade))
+	backends := model.AudioBackendOptions(runtime.GOOS)
+	labels := make([]string, len(backends))
+	for i, backend := range backends {
+		labels[i] = audioBackendLabel(runtime.GOOS, backend)
+	}
+	s.settingBackend.SetOptions(labels)
+	s.settingBackend.Select(audioBackendIndex(backends, s.settings.AudioBackend))
+}
+
+// normalizeAudioBackend makes an output this OS lacks (settings from
+// another OS, or an older Smolify's file) the automatic choice.
+func normalizeAudioBackend(st Settings, goos string) Settings {
+	if !model.KnownAudioBackend(goos, st.AudioBackend) {
+		st.AudioBackend = model.AudioBackendAuto
+	}
+	return st
+}
+
+// audioBackendIndex is backend's place among backends (0, automatic, when
+// absent).
+func audioBackendIndex(backends []string, backend string) int {
+	for i, option := range backends {
+		if option == backend {
+			return i
+		}
+	}
+	return 0
+}
+
+// audioBackendLabel is how the Audio output choice shows backend; the
+// automatic one names what it picks.
+func audioBackendLabel(goos, backend string) string {
+	if backend == model.AudioBackendAuto {
+		resolved, err := model.ResolveAudioBackend(goos, backend, "")
+		if err != nil {
+			return "Auto"
+		}
+		return "Auto · " + audioBackendLabel(goos, resolved)
+	}
+	switch backend {
+	case "audio-toolbox":
+		return "AudioToolbox"
+	case "pulseaudio":
+		return "PulseAudio"
+	case "alsa":
+		return "ALSA"
+	case "wasapi":
+		return "WASAPI"
+	default:
+		return backend
+	}
 }
 
 // The settings, as rows of the Settings page: one ID each, clicked or
@@ -85,6 +142,7 @@ const (
 	setQuality      = "set:quality"
 	setNormalise    = "set:normalise"
 	setCrossfade    = "set:crossfade"
+	setBackend      = "set:backend"
 	setAutoplay     = "set:autoplay"
 	setApplyAudio   = "set:apply-audio"
 	setDeviceName   = "set:device-name"
@@ -94,18 +152,23 @@ const (
 )
 
 // settingIDs are the rows in page order.
-var settingIDs = []string{setNotifyErrors, setNotifyTracks, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setDeviceName, setCompact, setImages, setSignOut}
+var settingIDs = []string{setNotifyErrors, setNotifyTracks, setBackend, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setDeviceName, setCompact, setImages, setSignOut}
 
-// settingRows are the rows s shows: a window has no terminal images.
-func settingRows(s *State) []string {
-	if !s.windowed {
+// settingRows are the rows s shows: a window has no terminal images, and
+// a browser no audio output to choose.
+func settingRows(s *State) []string { return settingRowsFor(s, runtime.GOOS) }
+
+func settingRowsFor(s *State, goos string) []string {
+	noOutput := len(model.AudioBackendOptions(goos)) == 0
+	if !s.windowed && !noOutput {
 		return settingIDs
 	}
-	rows := make([]string, 0, len(settingIDs)-1)
+	rows := make([]string, 0, len(settingIDs))
 	for _, id := range settingIDs {
-		if id != setImages {
-			rows = append(rows, id)
+		if (id == setImages && s.windowed) || (id == setBackend && noOutput) {
+			continue
 		}
+		rows = append(rows, id)
 	}
 	return rows
 }
@@ -153,6 +216,12 @@ func changeSetting(s *State, id string, step int) {
 		st.Crossfade = crossfades[wrap(pickOf(crossfades, st.Crossfade)+step, len(crossfades))].value
 	case setImages:
 		st.Images = imageModes[wrap(pickOf(imageModes, st.Images)+step, len(imageModes))].value
+	case setBackend:
+		backends := model.AudioBackendOptions(runtime.GOOS)
+		if len(backends) == 0 {
+			return
+		}
+		st.AudioBackend = backends[wrap(audioBackendIndex(backends, st.AudioBackend)+step, len(backends))]
 	case setApplyAudio:
 		applyAudioSettings(s)
 		return
@@ -180,6 +249,8 @@ func chooseSetting(s *State, id string, n int) {
 		st.Crossfade = crossfades[n].value
 	case id == setImages && n >= 0 && n < len(imageModes):
 		st.Images = imageModes[n].value
+	case id == setBackend && n >= 0 && n < len(model.AudioBackendOptions(runtime.GOOS)):
+		st.AudioBackend = model.AudioBackendOptions(runtime.GOOS)[n]
 	default:
 		return
 	}
@@ -223,6 +294,7 @@ func applySettings(s *State, st Settings) {
 	s.settings, s.compact = st, st.Compact // row heights follow at the next layout
 	s.settingQuality.Select(pickOf(qualities, st.Bitrate))
 	s.settingCrossfade.Select(pickOf(crossfades, st.Crossfade))
+	s.settingBackend.Select(audioBackendIndex(model.AudioBackendOptions(runtime.GOOS), st.AudioBackend))
 	if st.DeviceName != old.DeviceName {
 		name := st.DeviceName
 		sendLatest(s, "rename-device", func(ctx context.Context, be Backend) error { return be.SetDeviceName(ctx, name) })
@@ -298,9 +370,10 @@ func settingsKey(s *State, k flatte.KeyEvent) bool {
 		}
 		changeSetting(s, settingIDs[i], 1)
 	case flatte.KeyEscape:
-		if s.settingQuality.IsOpen() || s.settingCrossfade.IsOpen() {
+		if s.settingQuality.IsOpen() || s.settingCrossfade.IsOpen() || s.settingBackend.IsOpen() {
 			s.settingQuality.Close()
 			s.settingCrossfade.Close()
+			s.settingBackend.Close()
 			return true
 		}
 		travel(s, false)
@@ -317,6 +390,8 @@ func settingsChoiceKey(s *State, id string, key flatte.Key) bool {
 		selectChoice = &s.settingQuality
 	case setCrossfade:
 		selectChoice = &s.settingCrossfade
+	case setBackend:
+		selectChoice = &s.settingBackend
 	default:
 		return false
 	}
@@ -433,6 +508,11 @@ func settingsView(s *State, g bool, width int) layout.Node {
 		row(setNotifyTracks, "Now playing", "Each new song while Smolify is in the background", toggle(setNotifyTracks, st.NotifyTracks)),
 		section("AUDIO"),
 		layout.Label{NodeBase: layout.NodeBase{W: layout.Grow(1), PadLeft: 1, PadRight: 1}, Text: "Changes apply on next launch. Apply now briefly restarts playback.", Wrap: true, Style: secondary},
+	}
+	if slices.Contains(settingIDs, setBackend) {
+		body = append(body, row(setBackend, "Audio output", "Where sound plays; Auto uses the OS default", s.settingBackend.Layout(setBackend+":select", s.focus == paneSettings && cursor == setBackend)))
+	}
+	body = append(body,
 		row(setQuality, "Streaming quality", "96, 160, or 320 kbps", s.settingQuality.Layout(setQuality+":select", s.focus == paneSettings && cursor == setQuality)),
 		row(setNormalise, "Normalize volume", "The same loudness for every song", toggle(setNormalise, st.Normalise)),
 		row(setCrossfade, "Crossfade", "Blend the end of a song into the next", s.settingCrossfade.Layout(setCrossfade+":select", s.focus == paneSettings && cursor == setCrossfade)),
@@ -441,7 +521,7 @@ func settingsView(s *State, g bool, width int) layout.Node {
 		section("DEVICE AND ACCOUNT"),
 		row(setDeviceName, "Device name", "How Smolify shows in Spotify Connect (Enter to keep)", name),
 		row(setCompact, "Compact rows", "One line per song", toggle(setCompact, st.Compact)),
-	}
+	)
 	if !g {
 		modes := layout.Row{NodeBase: layout.NodeBase{Gap: 1}}
 		for n, m := range imageModes {
@@ -525,6 +605,8 @@ func settingClicked(s *State, target string) bool {
 		selectChoice = &s.settingQuality
 	case setCrossfade:
 		selectChoice = &s.settingCrossfade
+	case setBackend:
+		selectChoice = &s.settingBackend
 	}
 	if selectChoice != nil && selectChoice.Click(target, id+":select") {
 		for i, sid := range settingRows(s) {
@@ -540,6 +622,7 @@ func settingClicked(s *State, target string) bool {
 	}
 	s.settingQuality.Close()
 	s.settingCrossfade.Close()
+	s.settingBackend.Close()
 	for i, sid := range settingRows(s) {
 		if sid == id {
 			s.settingCursor = i
@@ -553,7 +636,7 @@ func settingClicked(s *State, target string) bool {
 	switch {
 	case id == setDeviceName:
 		s.focus = paneDevice
-	case part == "" && (id == setQuality || id == setCrossfade):
+	case part == "" && (id == setQuality || id == setCrossfade || id == setBackend):
 		// A click on the row, not a choice: nothing to change.
 	default:
 		changeSetting(s, id, 1)

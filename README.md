@@ -40,6 +40,23 @@ add that to your `PATH` if the command is not found.
 On first run, Smolify shows a code: open spotify.com/pair and enter it to
 sign in.
 
+## Audio output
+
+The Settings page's Audio output choice defaults to Auto: AudioToolbox on
+macOS, WASAPI on Windows, and PulseAudio on Linux (which also works with
+PipeWire's PulseAudio server). Set `SMOLIFY_AUDIO_BACKEND` to a backend
+offered for the current OS to override the saved choice, for example
+`SMOLIFY_AUDIO_BACKEND=alsa` on Linux.
+
+To build Smolify for Linux and verify a silent output stream against a
+headless PulseAudio null sink, with no Spotify account, run:
+
+```bash
+./scripts/test-linux-audio.sh
+```
+
+The script uses Docker to build the app and run the headless check.
+
 ## Build
 
 ```bash

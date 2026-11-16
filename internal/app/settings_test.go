@@ -8,6 +8,7 @@ import (
 	"image"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatest"
 	"github.com/lunguini/flatte/flatui/layout"
+	"github.com/lunguini/smolify/internal/model"
 	"github.com/lunguini/smolify/internal/player"
 )
 
@@ -35,9 +37,14 @@ func TestSettingsLoadAndSave(t *testing.T) {
 	if back, err := LoadSettings(path); err != nil || back != st {
 		t.Fatalf("read back %+v %v", back, err)
 	}
+	// An output this OS lacks (a file from another OS) falls back to auto.
+	os.WriteFile(path, []byte(`{"audio_backend":"invalid"}`), 0o600)
+	if back, err := LoadSettings(path); err != nil || back.AudioBackend != model.AudioBackendAuto {
+		t.Fatalf("unsupported backend should reset to auto: %+v %v", back, err)
+	}
 	// A file from an older Smolify keeps the defaults it lacks.
 	os.WriteFile(path, []byte(`{"bitrate": 96}`), 0o600)
-	if back, _ := LoadSettings(path); back.Bitrate != 96 || !back.NotifyTracks || back.DeviceName != "Smolify" {
+	if back, _ := LoadSettings(path); back.Bitrate != 96 || !back.NotifyTracks || back.DeviceName != "Smolify" || back.AudioBackend != model.AudioBackendAuto {
 		t.Fatalf("partial %+v", back)
 	}
 	os.WriteFile(path, []byte(`{`), 0o600)
@@ -87,7 +94,7 @@ func TestSettingsPageByClickAndKeys(t *testing.T) {
 		t.Fatalf("page %v focus %v", s.page, s.focus)
 	}
 	fr := plain(d.Frame())
-	for _, want := range []string{"Settings", "NOTIFICATIONS", "Streaming quality", "Crossfade", "Device name", "Sign Out"} {
+	for _, want := range []string{"Settings", "NOTIFICATIONS", "Streaming quality", "Crossfade", "Audio output", "Device name", "Sign Out"} {
 		if !strings.Contains(fr, want) {
 			t.Errorf("page missing %q:\n%s", want, fr)
 		}
@@ -117,7 +124,7 @@ func TestSettingsPageByClickAndKeys(t *testing.T) {
 	}
 	// Keys: ↓ to Normalize volume, space flips it; → steps crossfade.
 	s.settingCursor = 0
-	for range 3 {
+	for range 4 {
 		d.Send(flatte.KeyEvent{Key: flatte.KeyDown})
 	}
 	d.Send(flatte.KeyEvent{Key: flatte.KeyCharacter, Rune: ' '})
@@ -140,6 +147,101 @@ func TestSettingsPageByClickAndKeys(t *testing.T) {
 	if s.page != pageLibrary {
 		t.Fatalf("esc: page %v", s.page)
 	}
+}
+
+func TestSettingsAudioBackendPersistsAndApplies(t *testing.T) {
+	d, f, path := settingsDriver(t)
+	click(t, d, idSettings)
+	options := model.AudioBackendOptions(runtime.GOOS)
+	if len(options) < 2 {
+		t.Fatalf("only automatic backend option: %v", options)
+	}
+	want := options[1]
+	click(t, d, setBackend+":select")
+	click(t, d, setBackend+":select:option:1")
+	if d.State().settings.AudioBackend != want || d.State().activeAudio.Backend != model.AudioBackendAuto {
+		t.Fatalf("selection did not stage: settings=%+v active=%+v", d.State().settings, d.State().activeAudio)
+	}
+	d.Settle()
+	if got, err := LoadSettings(path); err != nil || got.AudioBackend != want {
+		t.Fatalf("backend was not saved: %+v %v", got, err)
+	}
+	click(t, d, setApplyAudio+":button")
+	d.Settle()
+	if got := d.State().activeAudio.Backend; got != want {
+		t.Fatalf("applied backend %q, want %q", got, want)
+	}
+	if len(f.audioCalls) != 1 || f.audioCalls[0].Backend != want {
+		t.Fatalf("Configure backend calls %+v, want %q", f.audioCalls, want)
+	}
+}
+
+func TestSettingsAudioBackendSelectorSurvivesAccountReset(t *testing.T) {
+	d, _, _ := settingsDriver(t)
+	s := d.State()
+	want := model.AudioBackendOptions(runtime.GOOS)[1]
+	s.settings.AudioBackend = want
+	resetAccount(s)
+	if s.settings.AudioBackend != want || s.settingBackend.Selected() != 1 || s.settingBackend.Value() != audioBackendLabel(runtime.GOOS, want) {
+		t.Fatalf("backend setting and selector diverged after reset: setting=%q selected=%d value=%q", s.settings.AudioBackend, s.settingBackend.Selected(), s.settingBackend.Value())
+	}
+}
+
+func TestSettingsAudioBackendKeyboardAndClickAway(t *testing.T) {
+	d, _, _ := settingsDriver(t)
+	click(t, d, idSettings)
+	s := d.State()
+	for i, id := range settingRows(s) {
+		if id == setBackend {
+			s.settingCursor = i
+			break
+		}
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyRight})
+	if !s.settingBackend.IsOpen() || s.settingBackend.Highlighted() != 1 {
+		t.Fatalf("right did not open and move the backend choice: open=%v highlighted=%d", s.settingBackend.IsOpen(), s.settingBackend.Highlighted())
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
+	options := model.AudioBackendOptions(runtime.GOOS)
+	if s.settingBackend.IsOpen() || s.settings.AudioBackend != options[1] {
+		t.Fatalf("enter did not select backend: open=%v setting=%q want=%q", s.settingBackend.IsOpen(), s.settings.AudioBackend, options[1])
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
+	if !s.settingBackend.IsOpen() {
+		t.Fatal("enter did not reopen backend choices")
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEscape})
+	if s.settingBackend.IsOpen() {
+		t.Fatal("escape did not close backend choices")
+	}
+	d.Send(flatte.KeyEvent{Key: flatte.KeyEnter})
+	if !s.settingBackend.IsOpen() {
+		t.Fatal("enter did not reopen backend choices after escape")
+	}
+	click(t, d, setNormalise+":toggle")
+	if s.settingBackend.IsOpen() {
+		t.Fatal("click away did not dismiss the backend dropdown")
+	}
+}
+
+// Where there is no output to choose (a browser), the row is not shown.
+func TestSettingsAudioBackendRowNeedsAChoice(t *testing.T) {
+	s := &State{}
+	if !slicesContains(settingRowsFor(s, runtime.GOOS), setBackend) {
+		t.Fatal("no output row on this OS")
+	}
+	if slicesContains(settingRowsFor(s, "js"), setBackend) {
+		t.Fatal("an output row in a browser")
+	}
+}
+
+func slicesContains(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSettingsDeviceNameAndSignOut(t *testing.T) {
