@@ -957,10 +957,14 @@ func withLiked(l model.Listing, t model.Track, on bool) model.Listing {
 	return l
 }
 
-// fetchCover fetches the cover at url once.
+// fetchCover fetches the cover at url once (while kept).
 func fetchCover(s *State, url string) {
 	if url == "" || s.img == nil || s.covers[url] != nil || s.fetching[url] {
 		return
+	}
+	if len(s.covers) >= maxCovers {
+		s.covers = map[string]image.Image{} // fetched again as shown
+		s.tints = map[string]color.Color{}
 	}
 	s.fetching[url] = true
 	img := s.img
@@ -984,11 +988,13 @@ func fetchCover(s *State, url string) {
 }
 
 // Cover sizes kept, in pixels: a header or player bar cover (at 2x), and
-// a row's thumbnail; maxThumbs bounds how many thumbnails are kept.
+// a row's thumbnail; maxThumbs bounds how many thumbnails are kept and
+// maxCovers how many cover images and tints.
 const (
 	coverPixels = 320
 	thumbPixels = 96
 	maxThumbs   = 600
+	maxCovers   = 256
 )
 
 // fetchThumb fetches the thumbnail of the cover at url once (while kept).
