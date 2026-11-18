@@ -46,8 +46,14 @@ if [[ -f "$ROOT/web/local.env" ]]; then
   # shellcheck disable=SC1091
   source "$ROOT/web/local.env"
 fi
-sed -e "s|name=\"smolify-client-id\" content=\"\"|name=\"smolify-client-id\" content=\"${SMOLIFY_CLIENT_ID:-}\"|" \
-  -e "s|name=\"smolify-redirect-uri\" content=\"\"|name=\"smolify-redirect-uri\" content=\"${SMOLIFY_REDIRECT_URI:-}\"|" \
+
+# sed_escape escapes a value for a sed replacement that uses | as delimiter.
+sed_escape() {
+  printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
+}
+
+sed -e "s|name=\"smolify-client-id\" content=\"\"|name=\"smolify-client-id\" content=\"$(sed_escape "${SMOLIFY_CLIENT_ID:-}")\"|" \
+  -e "s|name=\"smolify-redirect-uri\" content=\"\"|name=\"smolify-redirect-uri\" content=\"$(sed_escape "${SMOLIFY_REDIRECT_URI:-}")\"|" \
   "$ROOT/web/index.html" > "$OUT/index.html"
 command -v brotli >/dev/null || { echo "brotli is required to build the compressed site" >&2; exit 1; }
 while IFS= read -r -d '' file; do
