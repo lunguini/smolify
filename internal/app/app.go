@@ -957,10 +957,14 @@ func withLiked(l model.Listing, t model.Track, on bool) model.Listing {
 	return l
 }
 
-// fetchCover fetches the cover at url once.
+// fetchCover fetches the cover at url once (while kept).
 func fetchCover(s *State, url string) {
 	if url == "" || s.img == nil || s.covers[url] != nil || s.fetching[url] {
 		return
+	}
+	if len(s.covers) >= maxCovers {
+		s.covers = map[string]image.Image{} // fetched again as shown
+		s.tints = map[string]color.Color{}
 	}
 	s.fetching[url] = true
 	img := s.img
@@ -984,11 +988,13 @@ func fetchCover(s *State, url string) {
 }
 
 // Cover sizes kept, in pixels: a header or player bar cover (at 2x), and
-// a row's thumbnail; maxThumbs bounds how many thumbnails are kept.
+// a row's thumbnail; maxThumbs bounds how many thumbnails are kept and
+// maxCovers how many cover images and tints.
 const (
 	coverPixels = 320
 	thumbPixels = 96
 	maxThumbs   = 600
+	maxCovers   = 256
 )
 
 // fetchThumb fetches the thumbnail of the cover at url once (while kept).
@@ -1474,6 +1480,10 @@ func openHome(s *State) {
 // homeLists bounds how many recently played lists Home looks into.
 const homeLists = 20
 
+// contextRefresh is the least time between listing requests for one context
+// while Home waits for partial listings to fill in.
+const contextRefresh = 500 * time.Millisecond
+
 // recentTracks are the tracks last played in the lists played lately,
 // each once, played where it was played from. A list the player cannot
 // list, or whose track it no longer has, is left out.
@@ -1486,6 +1496,7 @@ func recentTracks(ctx context.Context, be Backend, user string) ([]model.Track, 
 	}
 	found := map[string]model.Track{}
 	finished := map[int]bool{}
+	refreshed := map[string]time.Time{}
 	for {
 		if err := ctx.Err(); err != nil {
 			return recentResult(played, found, err)
@@ -1498,6 +1509,11 @@ func recentTracks(ctx context.Context, be Backend, user string) ([]model.Track, 
 			}
 			l, ok := listings[p.ContextURI]
 			if !ok {
+				if last, asked := refreshed[p.ContextURI]; asked && time.Since(last) < contextRefresh {
+					pending = true
+					continue
+				}
+				refreshed[p.ContextURI] = time.Now()
 				l, err = be.ContextTracks(ctx, p.ContextURI)
 				if err != nil {
 					if ctx.Err() != nil {

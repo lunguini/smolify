@@ -71,6 +71,33 @@ func TestHomeWaitsForColdTrackDetails(t *testing.T) {
 		t.Fatalf("tracks %+v err %v asked %d", tracks, err, f.asked)
 	}
 }
+func TestRecentTracksThrottlesContextRefreshes(t *testing.T) {
+	f := &fake{
+		recent: []player.Played{
+			{ContextURI: "spotify:playlist:a", TrackURI: song.URI},
+			{ContextURI: "spotify:playlist:b", TrackURI: song.URI},
+			{ContextURI: "spotify:album:c", TrackURI: song.URI},
+		},
+		listings: map[string]player.Listing{
+			"spotify:playlist:a": {URI: "spotify:playlist:a", Length: 2, Cached: 1},
+			"spotify:playlist:b": {URI: "spotify:playlist:b", Length: 2, Cached: 1},
+			"spotify:album:c":    {URI: "spotify:album:c", Length: 2, Cached: 1},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	defer cancel()
+	// The listings never complete, so the wait runs into its deadline.
+	_, _ = recentTracks(ctx, f, "user")
+	asked := 0
+	for _, r := range f.reads {
+		if strings.HasPrefix(r, "tracks ") {
+			asked++
+		}
+	}
+	if asked < 3 || asked > 4 {
+		t.Fatalf("asked %d context listings in 350ms, want 3 or 4", asked)
+	}
+}
 func TestHomeWaitHonorsCancellation(t *testing.T) {
 	f := &fake{recent: []player.Played{{ContextURI: "cold", TrackURI: song.URI}}, listings: map[string]player.Listing{"cold": {URI: "cold", Length: 1}}}
 	ctx, cancel := context.WithCancel(context.Background())

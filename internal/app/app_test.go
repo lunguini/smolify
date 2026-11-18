@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/color"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1199,5 +1200,25 @@ func TestTransientFailuresStayOffScreen(t *testing.T) {
 	fail(s, "Could not load Home: context deadline exceeded")
 	if s.status != "" {
 		t.Fatalf("a timeout reached the status line: %q", s.status)
+	}
+}
+
+// Cover images and their tints are bounded like thumbnails: at capacity the
+// maps restart and visible covers are fetched again.
+func TestCoverCacheResetsAtCapacity(t *testing.T) {
+	d, _, c := start(t)
+	s := d.State()
+	for i := range maxCovers {
+		url := fmt.Sprintf("https://img/%d", i)
+		s.covers[url] = image.NewRGBA(image.Rect(0, 0, 1, 1))
+		s.tints[url] = color.Black
+	}
+	fetchCover(s, "https://img/fresh")
+	d.Settle()
+	if len(s.covers) != 1 || s.covers["https://img/fresh"] == nil || len(s.tints) != 1 {
+		t.Fatalf("covers %d tints %d after the cache filled", len(s.covers), len(s.tints))
+	}
+	if len(c.fetched) != 1 || c.fetched[0] != "https://img/fresh" {
+		t.Fatalf("fetched %v", c.fetched)
 	}
 }

@@ -27,13 +27,16 @@ type Client struct {
 	Auth *Auth
 	SDK  SDK
 
-	mu        sync.Mutex
-	events    chan model.Event
-	deviceID  string // only the SDK device receives transport commands
-	username  string
-	status    model.Status
-	likedURIs []string
-	started   bool
+	mu         sync.Mutex
+	events     chan model.Event
+	deviceID   string // only the SDK device receives transport commands
+	username   string
+	status     model.Status
+	likedURIs  []string
+	started    bool
+	connecting bool
+	connected  bool
+	loopCancel context.CancelFunc // stops the SDK event and playback loops
 }
 
 func NewClient(api *API, auth *Auth, sdk SDK) *Client {
@@ -45,24 +48,46 @@ func NewClient(api *API, auth *Auth, sdk SDK) *Client {
 
 // Start starts the SDK event loop and connects the browser as a Connect
 // device. It emits Ready so the app can load the account library immediately.
+// A failed connection can be retried; a started one is not connected twice.
 func (c *Client) Start(ctx context.Context) error {
 	c.mu.Lock()
-	if c.started {
+	if c.connected {
 		c.mu.Unlock()
 		return nil
 	}
+	if c.connecting {
+		c.mu.Unlock()
+		return errors.New("spotify Web Playback SDK is already connecting")
+	}
+	c.connecting = true
+	first := !c.started
 	c.started = true
 	c.mu.Unlock()
-	c.emit(model.Ready{})
+	if first {
+		c.emit(model.Ready{})
+	}
 	if c.SDK == nil {
+		c.mu.Lock()
+		c.connecting = false
+		c.mu.Unlock()
 		return errors.New("spotify Web Playback SDK is unavailable")
 	}
-	go c.watchSDK(ctx)
+	// Connect may block on the browser, so it runs without c.mu.
 	if err := c.SDK.Connect(ctx); err != nil {
+		c.mu.Lock()
+		c.connecting = false
+		c.mu.Unlock()
 		c.emit(MapSDKError(SDKInitError, err.Error()))
 		return err
 	}
-	go c.pollPlayback(ctx)
+	loopCtx, cancel := context.WithCancel(ctx)
+	c.mu.Lock()
+	c.connecting = false
+	c.connected = true
+	c.loopCancel = cancel
+	c.mu.Unlock()
+	go c.watchSDK(loopCtx)
+	go c.pollPlayback(loopCtx)
 	return nil
 }
 
@@ -356,9 +381,21 @@ func (c *Client) SetDeviceName(ctx context.Context, name string) error {
 }
 
 func (c *Client) SignOut(context.Context) error {
+	c.mu.Lock()
+	cancel := c.loopCancel
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	if c.SDK != nil {
 		_ = c.SDK.Disconnect()
 	}
+	// A later Start reconnects the SDK: the loops above and the device are
+	// gone, so none of the start state survives the sign-out.
+	c.mu.Lock()
+	c.loopCancel = nil
+	c.started, c.connected, c.connecting = false, false, false
+	c.mu.Unlock()
 	if c.Auth == nil || c.Auth.Store == nil {
 		return errors.New("spotify auth session store is unavailable")
 	}
