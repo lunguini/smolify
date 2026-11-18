@@ -270,3 +270,33 @@ func TestCancelDuringStopKeepsPlayerRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A session that cannot start leaves the player on a working one, so later
+// requests do not report the stopped session as ended.
+func TestConfigureKeepsSessionWhenRestartFails(t *testing.T) {
+	p := &Player{ctx: context.Background(), opts: Options{Dir: t.TempDir()}, events: make(chan Event, 8)}
+	calls := 0
+	p.newApp = func(o *daemon.Options) (sessionApp, error) {
+		calls++
+		if calls == 2 {
+			return nil, errors.New("audio output unavailable")
+		}
+		return sessionAppFunc(func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }), nil
+	}
+	p.mu.Lock()
+	err := p.launch()
+	p.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(p.Close)
+	if err := p.Configure(context.Background(), Audio{Bitrate: 96}); err == nil {
+		t.Fatal("Configure hid a failed restart")
+	}
+	p.mu.Lock()
+	session := p.session
+	p.mu.Unlock()
+	if session == nil || session.ctx.Err() != nil {
+		t.Fatalf("session after a failed restart = %v", session)
+	}
+}

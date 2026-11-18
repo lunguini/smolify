@@ -280,13 +280,15 @@ func (p *Player) Configure(ctx context.Context, a Audio) error {
 	p.opts.Audio = a
 	err := p.launch()
 	if err != nil {
+		// Keep a working device when the new session cannot start, as the
+		// cancellation path above does, and report both failures.
 		p.opts.Audio = previousAudio
+		restartErr := p.launch()
+		p.mu.Unlock()
+		return errors.Join(err, restartErr)
 	}
 	next := p.session
 	p.mu.Unlock()
-	if err != nil {
-		return err
-	}
 	// Even an idle restart waits for readiness, so subsequent settings
 	// changes cannot race the new session's sign-in.
 	if err := next.waitReady(op); err != nil {
