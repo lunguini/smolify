@@ -1480,6 +1480,10 @@ func openHome(s *State) {
 // homeLists bounds how many recently played lists Home looks into.
 const homeLists = 20
 
+// contextRefresh is the least time between listing requests for one context
+// while Home waits for partial listings to fill in.
+const contextRefresh = 500 * time.Millisecond
+
 // recentTracks are the tracks last played in the lists played lately,
 // each once, played where it was played from. A list the player cannot
 // list, or whose track it no longer has, is left out.
@@ -1492,6 +1496,7 @@ func recentTracks(ctx context.Context, be Backend, user string) ([]model.Track, 
 	}
 	found := map[string]model.Track{}
 	finished := map[int]bool{}
+	refreshed := map[string]time.Time{}
 	for {
 		if err := ctx.Err(); err != nil {
 			return recentResult(played, found, err)
@@ -1504,6 +1509,11 @@ func recentTracks(ctx context.Context, be Backend, user string) ([]model.Track, 
 			}
 			l, ok := listings[p.ContextURI]
 			if !ok {
+				if last, asked := refreshed[p.ContextURI]; asked && time.Since(last) < contextRefresh {
+					pending = true
+					continue
+				}
+				refreshed[p.ContextURI] = time.Now()
 				l, err = be.ContextTracks(ctx, p.ContextURI)
 				if err != nil {
 					if ctx.Err() != nil {
