@@ -36,7 +36,9 @@ func staticSite(root string) http.Handler {
 		if name == "" || name == "." {
 			name = "index.html"
 		}
-		if strings.HasPrefix(name, "../") || name == ".." {
+		// path.Clean only knows "/", so on Windows a backslash survives and
+		// filepath.Join would escape root; IsLocal rejects those names.
+		if !filepath.IsLocal(name) {
 			http.NotFound(w, r)
 			return
 		}
