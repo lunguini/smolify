@@ -538,6 +538,8 @@ func centerView(s *State, g bool, width int) layout.Node {
 		return virtualView(s, g, width, "Search", "Songs", nil)
 	case pageSettings:
 		return settingsView(s, g, width)
+	case pageThemes:
+		return themesView(s, g, width)
 	}
 	pl, ok := s.selected()
 	if !ok {

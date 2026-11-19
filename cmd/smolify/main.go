@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -64,7 +65,7 @@ func main() {
 	if *demoMode {
 		backend := demo.New()
 		go backend.Run(ctx)
-		a := app.WithLooks(app.New(backend, backend, backend, nil), spicetifyLooks())
+		a := app.WithMarketplace(app.WithLooks(app.New(backend, backend, backend, nil), spicetifyLooks()), marketplace(), nil, nil)
 		if gui {
 			a = app.Windowed(a)
 		}
@@ -98,7 +99,14 @@ func main() {
 		defer writeHeapProfile(*heapProfile)
 	}
 	web := &spotify.Client{Token: p.Token, ClientToken: p.ClientToken}
-	a := app.WithCache(app.WithSettings(app.WithLooks(app.New(p, app.HTTPImages{}, web, debug), spicetifyLooks()), settingsPath, settings), cacheDir)
+	themesPath := app.ThemesPath(dir)
+	saved, err := app.LoadThemes(themesPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "smolify: themes:", err)
+	}
+	a := app.New(p, app.HTTPImages{}, web, debug)
+	a = app.WithMarketplace(app.WithLooks(a, spicetifyLooks()), marketplace(), &app.FileThemes{Path: themesPath}, saved)
+	a = app.WithCache(app.WithSettings(a, settingsPath, settings), cacheDir)
 	if gui {
 		a = app.Windowed(a)
 	}
@@ -120,6 +128,11 @@ func runOptions(gui bool) []flatte.Option {
 		return append(options, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
 	}
 	return append(options, media.Controls{})
+}
+
+// marketplace is the Spicetify Marketplace's theme index on GitHub.
+func marketplace() spicetify.Marketplace {
+	return spicetify.Marketplace{Client: &http.Client{Timeout: 20 * time.Second}}
 }
 
 // spicetifyLooks are the color schemes of the themes installed for

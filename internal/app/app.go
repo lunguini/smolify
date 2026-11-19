@@ -143,6 +143,9 @@ type State struct {
 	compact bool
 
 	// page is what the center shows; query is the search field, and
+	// themeDelay is how long the theme browser's cursor must rest on a
+	// theme before Smolify takes it.
+	themeDelay time.Duration
 	// searchDelay how long typing must pause before it searches.
 	page        page
 	query       flatui.TextField
@@ -200,7 +203,11 @@ type State struct {
 	settingBackend   flatui.Select
 	// looks are the looks Settings offers, Smolify's own first; settingTheme
 	// picks among them (Settings.Theme holds the choice).
-	looks                       []Look
+	looks []Look
+	// spicetifyLooks are the host's installed Spicetify schemes; market is
+	// the Marketplace theme browser (and the themes chosen there lately).
+	spicetifyLooks              []Look
+	market                      marketState
 	settingTheme                flatui.Select
 	settingsStore               SettingsStore
 	deviceName                  flatui.TextField
@@ -227,6 +234,7 @@ const (
 	paneSearch      // the search field: keys type
 	paneSettings    // the Settings page's rows
 	paneDevice      // the device name field: keys type
+	paneThemes      // the theme browser's list
 	panePlayer      // default playback focus after a background click
 )
 
@@ -245,6 +253,7 @@ const (
 	pageSearch
 	pageSettings
 	pageBrowse // album, artist, station, or playlist outside the library rail
+	pageThemes // the Spicetify Marketplace theme browser
 )
 
 // The listings of Home (recently played) and of search results, beside the
@@ -289,6 +298,8 @@ func goTo(s *State, p place) {
 		openSearch(s)
 	case pageSettings:
 		s.page, s.focus = pageSettings, paneSettings
+	case pageThemes:
+		s.page, s.focus = pageThemes, paneThemes
 	case pageBrowse:
 		p := s.discovery.Pages[p.list]
 		openBrowse(s, p.URI, p.Name, p.Image)
@@ -320,10 +331,11 @@ func travel(s *State, forward bool) {
 }
 
 // typing is whether plain keys go to a field or a form rather than being
-// shortcuts: the search and device name fields, and the Settings rows
-// (where Space, ←, and → change a setting).
+// shortcuts: the search and device name fields, the Settings rows (where
+// Space, ←, and → change a setting), and the theme browser (where ← and →
+// step a theme's color schemes).
 func (s *State) typing() bool {
-	return s.focus == paneSearch || s.focus == paneDevice || s.focus == paneTrackFilter || s.page == pageSettings && s.focus == paneSettings
+	return s.focus == paneSearch || s.focus == paneDevice || s.focus == paneTrackFilter || s.page == pageSettings && s.focus == paneSettings || s.page == pageThemes && s.focus == paneThemes
 }
 
 // trackRowLines is a track row's height in lines.
@@ -379,7 +391,7 @@ const (
 // commands, and request failures.
 func New(be Backend, img Images, web Web, debug io.Writer) flatte.App[State] {
 	s := &State{
-		be: be, img: img, web: web, volMax: 100, debug: debug, searchDelay: 300 * time.Millisecond,
+		be: be, img: img, web: web, volMax: 100, debug: debug, searchDelay: 300 * time.Millisecond, themeDelay: 250 * time.Millisecond,
 		covers: map[string]image.Image{}, tints: map[string]color.Color{}, thumbs: map[string]image.Image{}, thumbing: map[string]bool{}, fetching: map[string]bool{},
 		listings: map[string]model.Listing{}, listing: map[string]bool{}, stale: map[string]bool{},
 		likedLoads: map[string]*likedLoad{}, likedGeneration: map[string]uint64{},
@@ -1277,6 +1289,7 @@ func Handle(s *State, ev flatte.Event, fx flatte.Effects[State]) {
 		}
 		s.rail.Adopt(e, idRail)
 		s.tracks.Adopt(e, idTracks)
+		s.market.list.Adopt(e, idThemes)
 		if _, ok := e.Rects[idSettingsScroll]; ok {
 			s.settingRects = e.Rects
 			clampSettings(s)
@@ -1326,6 +1339,9 @@ func Handle(s *State, ev flatte.Event, fx flatte.Effects[State]) {
 			return
 		}
 		if s.page == pageSettings && s.focus == paneSettings && settingsKey(s, e) {
+			return
+		}
+		if s.page == pageThemes && s.focus == paneThemes && themesKey(s, e) {
 			return
 		}
 		if s.focus == paneSearch {
@@ -1824,6 +1840,12 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 	if !strings.HasPrefix(m.Target, setBackend+":select") {
 		s.settingBackend.Close()
 	}
+	if !strings.HasPrefix(m.Target, setTheme+":select") {
+		s.settingTheme.Close()
+	}
+	if themeClicked(s, m.Target) {
+		return
+	}
 	if settingClicked(s, m.Target) {
 		return
 	}
@@ -1969,6 +1991,8 @@ func wheel(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 		scrollHome(s, rows*3)
 	case s.page == pageSettings && (m.Target == idSettingsScroll || m.Target == idSettingsContent || settingTarget):
 		s.settingsScroll = min(max(s.settingsScroll+rows*2, 0), s.settingsMax)
+	case s.page == pageThemes && (m.Target == idThemes || strings.HasPrefix(m.Target, idThemes+":")):
+		s.market.list.Scroll(rows)
 	}
 }
 

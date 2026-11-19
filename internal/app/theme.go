@@ -130,9 +130,30 @@ func SpicetifyLook(sc spicetify.Scheme) Look {
 	if c, ok := key("shadow"); ok {
 		p.Shadow = color.NRGBA{c.R, c.G, c.B, 0x80}
 	}
+	// Text that would not read on the scheme's own cards gives way to text
+	// that does: browsing themes must never leave Smolify unreadable.
+	card := theme.Over(p.Content, p.Canvas)
+	if theme.Contrast(p.Text, card) < 4.5 {
+		p.Text = readableOn(card)
+	}
+	if theme.Contrast(p.TextSecondary, card) < 4.5 {
+		p.TextSecondary = blend(p.Text, card, 0.3)
+		if theme.Contrast(p.TextSecondary, card) < 4.5 {
+			p.TextSecondary = p.Text
+		}
+	}
 	t.Dark, t.Light = p, p
 	l.Design = t
 	return l
+}
+
+// readableOn is near-white or near-black, whichever reads better on bg.
+func readableOn(bg color.NRGBA) color.NRGBA {
+	light, dark := theme.Hex("#f5f5f5"), theme.Hex("#121212")
+	if theme.Contrast(light, bg) >= theme.Contrast(dark, bg) {
+		return light
+	}
+	return dark
 }
 
 // translucent is c as a card: as see-through as Smolify's own.

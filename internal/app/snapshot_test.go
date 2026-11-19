@@ -69,6 +69,32 @@ func TestWindowSnapshot(t *testing.T) {
 			f.Close()
 		}
 	}
+	// The theme browser, landed on a theme with several schemes.
+	s.market.source = &fakeThemes{}
+	s.market.themes = []spicetify.Theme{
+		{ID: "spicetify/spicetify-themes/Nord", Name: "Nord", Description: "Nord", Author: "Tetrax-10", Stars: 6156},
+		{ID: "spicetify/spicetify-themes/Sleek", Name: "Sleek", Description: "Sleek", Author: "harbassan", Stars: 6156},
+		{ID: "catppuccin/spicetify/catppuccin", Name: "catppuccin", Description: "Soothing pastel theme for Spicetify", Author: "catppuccin", Stars: 1200},
+	}
+	s.market.schemes = map[string][]spicetify.Scheme{"spicetify/spicetify-themes/Nord": {{Name: "Nord"}, {Name: "Frost"}}}
+	s.market.saved = []SavedTheme{{Theme: s.market.themes[0], Schemes: []spicetify.Scheme{{Theme: "Nord", Name: "Nord", Colors: map[string]color.NRGBA{
+		"text": theme.Hex("#d8dee9"), "subtext": theme.Hex("#abb1bb"), "main": theme.Hex("#2e3440"), "sidebar": theme.Hex("#2b303b"),
+		"player": theme.Hex("#242933"), "card": theme.Hex("#3b4252"), "button": theme.Hex("#88c0d0"), "selected-row": theme.Hex("#4c566a"),
+	}}}}}
+	rebuildLooks(s)
+	s.settings.Theme = marketLookID(s.market.themes[0], "Nord")
+	s.page, s.focus = pageThemes, paneThemes
+	s.market.list.SetCount(1 + len(s.market.themes))
+	s.market.list.SetHeight(8)
+	s.market.list.Select(1)
+	if img, err := window.Snapshot(a, snapOptions(110, 40), 2); err == nil {
+		if f, err := os.Create(filepath.Join(dir, "smolify-themes.png")); err == nil {
+			png.Encode(f, img)
+			f.Close()
+		}
+	} else {
+		t.Fatal(err)
+	}
 	s.page, s.settings.Theme = pageLibrary, ""
 	s.settingTheme.Select(0)
 	// Liked Songs and a playlist without a cover, on Smolify's own art.

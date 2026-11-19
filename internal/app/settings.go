@@ -86,9 +86,20 @@ func WithSettingsStore(app flatte.App[State], store SettingsStore, st Settings) 
 // schemes the host found installed for Spicetify.
 func WithLooks(app flatte.App[State], looks []Look) flatte.App[State] {
 	s := app.State
-	s.looks = append([]Look{SmolifyLook()}, looks...)
-	initThemeSetting(s)
+	s.spicetifyLooks = looks
+	rebuildLooks(s)
 	return app
+}
+
+// rebuildLooks makes s.looks Smolify's own, then the host's Spicetify
+// schemes, then the Marketplace themes chosen lately, and offers them.
+func rebuildLooks(s *State) {
+	looks := append([]Look{SmolifyLook()}, s.spicetifyLooks...)
+	for _, saved := range s.market.saved {
+		looks = append(looks, saved.looks()...)
+	}
+	s.looks = looks
+	initThemeSetting(s)
 }
 
 func initThemeSetting(s *State) {
@@ -193,26 +204,27 @@ const (
 	setApplyAudio   = "set:apply-audio"
 	setDeviceName   = "set:device-name"
 	setTheme        = "set:theme"
+	setBrowseThemes = "set:browse-themes"
 	setCompact      = "set:compact"
 	setImages       = "set:images"
 	setSignOut      = "set:sign-out"
 )
 
 // settingIDs are the rows in page order.
-var settingIDs = []string{setNotifyErrors, setNotifyTracks, setBackend, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setTheme, setDeviceName, setCompact, setImages, setSignOut}
+var settingIDs = []string{setNotifyErrors, setNotifyTracks, setBackend, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setTheme, setBrowseThemes, setDeviceName, setCompact, setImages, setSignOut}
 
 // settingRows are the rows s shows: a window has no terminal images, and
 // a browser no audio output to choose.
 func settingRows(s *State) []string { return settingRowsFor(s, runtime.GOOS) }
 
 func settingRowsFor(s *State, goos string) []string {
-	noOutput, oneLook := len(model.AudioBackendOptions(goos)) == 0, len(s.looks) < 2
-	if !s.windowed && !noOutput && !oneLook {
+	noOutput, oneLook, noMarket := len(model.AudioBackendOptions(goos)) == 0, len(s.looks) < 2, s.market.source == nil
+	if !s.windowed && !noOutput && !oneLook && !noMarket {
 		return settingIDs
 	}
 	rows := make([]string, 0, len(settingIDs))
 	for _, id := range settingIDs {
-		if (id == setImages && s.windowed) || (id == setBackend && noOutput) || (id == setTheme && oneLook) {
+		if (id == setImages && s.windowed) || (id == setBackend && noOutput) || (id == setTheme && oneLook) || (id == setBrowseThemes && noMarket) {
 			continue
 		}
 		rows = append(rows, id)
@@ -279,6 +291,9 @@ func changeSetting(s *State, id string, step int) {
 		return
 	case setDeviceName:
 		s.focus = paneDevice
+		return
+	case setBrowseThemes:
+		openThemes(s)
 		return
 	case setSignOut:
 		if supportsSignOut(s) {
@@ -578,9 +593,14 @@ func settingsView(s *State, g bool, width int) layout.Node {
 		row(setAutoplay, "Autoplay", "Keep playing similar songs when a list ends", toggle(setAutoplay, st.Autoplay)),
 		row(setApplyAudio, "Apply audio changes", "Restart the current player to use these choices", layout.Button{NodeBase: layout.NodeBase{ID: setApplyAudio + ":button"}, Label: applyLabel, Default: !s.applyingAudio && audioDirty, Disabled: s.applyingAudio || !audioDirty}),
 	)
+	if slices.Contains(settingIDs, setTheme) || slices.Contains(settingIDs, setBrowseThemes) {
+		body = append(body, section("APPEARANCE"))
+	}
 	if slices.Contains(settingIDs, setTheme) {
-		body = append(body, section("APPEARANCE"),
-			row(setTheme, "Theme", "Smolify's own, or a color scheme installed for Spicetify", s.settingTheme.Layout(setTheme+":select", s.focus == paneSettings && cursor == setTheme)))
+		body = append(body, row(setTheme, "Theme", "Smolify's own, or a Spicetify color scheme", s.settingTheme.Layout(setTheme+":select", s.focus == paneSettings && cursor == setTheme)))
+	}
+	if slices.Contains(settingIDs, setBrowseThemes) {
+		body = append(body, row(setBrowseThemes, "Browse themes", "Try the Spicetify Marketplace's themes; the one you land on stays", layout.Button{NodeBase: layout.NodeBase{ID: setBrowseThemes + ":button"}, Label: "Browse…"}))
 	}
 	body = append(body,
 		section("DEVICE AND ACCOUNT"),

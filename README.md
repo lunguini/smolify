@@ -59,13 +59,17 @@ The script uses Docker to build the app and run the headless check.
 
 ## Themes
 
-Smolify draws in its own look by default. If you use
-[Spicetify](https://spicetify.app), the color schemes of your installed
-Spicetify themes show up under Settings › Appearance › Theme, and switching
-restyles Smolify right away, in the terminal and in the window. Smolify reads
-each theme's `color.ini` from Spicetify's config folder (`SPICETIFY_CONFIG`
-overrides where it looks). It ignores `user.css`, which styles Spotify's own
-interface.
+Smolify draws in its own look by default. To change it, open Settings ›
+Appearance › Browse themes. It lists the themes on the
+[Spicetify](https://spicetify.app) Marketplace, and the one you land on is
+the one Smolify uses: the whole app restyles as you move through the list, and
+← and → step through a theme's color schemes. Your choice stays for the next
+launch, also offline. The first entry goes back to Smolify's own look.
+
+Smolify uses only a theme's colors (its `color.ini`), never its CSS or code.
+If you use Spicetify itself, the themes installed in its config folder show up
+under Settings › Appearance › Theme as well (`SPICETIFY_CONFIG` overrides
+where Smolify looks). Spicetify doesn't need to be installed to browse.
 
 ## Build
 

@@ -171,3 +171,23 @@ func TestMissingLookFallsBackToSmolify(t *testing.T) {
 		t.Fatal("the saved choice was dropped")
 	}
 }
+
+// A scheme whose text would not read on its cards still draws readable
+// text: browsing must never leave Smolify unreadable.
+func TestSpicetifyLookKeepsTextReadable(t *testing.T) {
+	for _, colors := range []map[string]color.NRGBA{
+		{"main": theme.Hex("#202020"), "text": theme.Hex("#222222"), "subtext": theme.Hex("#252525")},                                 // dark on dark
+		{"main": theme.Hex("#f4f4f4"), "player": theme.Hex("#ffffff"), "text": theme.Hex("#fafafa"), "subtext": theme.Hex("#eeeeee")}, // light on light
+		{"main": theme.Hex("#f4f4f4"), "player": theme.Hex("#ffffff")},                                                                // a light scheme that leaves the text to Smolify's light text
+	} {
+		l := SpicetifyLook(spicetify.Scheme{Theme: "T", Name: "S", Colors: colors})
+		p := l.Design.Dark
+		card := theme.Over(p.Content, p.Canvas)
+		if r := theme.Contrast(p.Text, card); r < 4.5 {
+			t.Errorf("%v: text %.2f:1", colors, r)
+		}
+		if r := theme.Contrast(p.TextSecondary, card); r < 4.5 {
+			t.Errorf("%v: secondary text %.2f:1", colors, r)
+		}
+	}
+}
