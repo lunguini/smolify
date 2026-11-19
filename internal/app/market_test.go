@@ -289,3 +289,38 @@ func TestFileThemesRoundTrip(t *testing.T) {
 		t.Fatalf("loaded %+v, %v", got, err)
 	}
 }
+
+// Resting the pointer on a theme takes it, as the keyboard does; sweeping
+// across rows takes only the one it rests on.
+func TestHoverRestingOnAThemeTakesIt(t *testing.T) {
+	d, src, _ := marketDriver(t, nil)
+	s := d.State()
+	s.themeHoverDelay = 0
+	openThemes(s)
+	d.Settle()
+	hover := func(target string) {
+		// As a host delivers it, its target resolved from the pointer.
+		handleMouse(s, flatte.MouseEvent{Action: flatte.MouseMotion, Button: flatte.MouseNone, Target: target}, s.fx)
+	}
+	hover("themes:1") // Sleek, passed over
+	hover("themes:2") // Ziro, rested on
+	d.Settle()
+	if s.settings.Theme != marketLookID(ziro, "purple-dark") || s.market.list.Cursor() != 2 {
+		t.Fatalf("after resting on Ziro: theme %q cursor %d", s.settings.Theme, s.market.list.Cursor())
+	}
+	if src.asked[sleek.ID] != 0 {
+		t.Fatalf("a theme passed over was fetched: %v", src.asked)
+	}
+	hover("themes:2") // still on Ziro: nothing new
+	hover("themes:0") // Smolify's own look, rested on
+	d.Settle()
+	if s.settings.Theme != "" {
+		t.Fatalf("resting on Smolify: theme %q", s.settings.Theme)
+	}
+	// Elsewhere on the page, and on other pages, motion does nothing.
+	hover("idle")
+	d.Settle()
+	if s.settings.Theme != "" || s.market.list.Cursor() != 0 {
+		t.Fatalf("motion off the list: theme %q cursor %d", s.settings.Theme, s.market.list.Cursor())
+	}
+}

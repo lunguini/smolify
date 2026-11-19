@@ -146,6 +146,9 @@ type State struct {
 	// themeDelay is how long the theme browser's cursor must rest on a
 	// theme before Smolify takes it.
 	themeDelay time.Duration
+	// themeHoverDelay is how long the pointer must rest on a theme (longer:
+	// a pointer crosses rows on its way elsewhere).
+	themeHoverDelay time.Duration
 	// searchDelay how long typing must pause before it searches.
 	page        page
 	query       flatui.TextField
@@ -391,7 +394,7 @@ const (
 // commands, and request failures.
 func New(be Backend, img Images, web Web, debug io.Writer) flatte.App[State] {
 	s := &State{
-		be: be, img: img, web: web, volMax: 100, debug: debug, searchDelay: 300 * time.Millisecond, themeDelay: 250 * time.Millisecond,
+		be: be, img: img, web: web, volMax: 100, debug: debug, searchDelay: 300 * time.Millisecond, themeDelay: 250 * time.Millisecond, themeHoverDelay: 400 * time.Millisecond,
 		covers: map[string]image.Image{}, tints: map[string]color.Color{}, thumbs: map[string]image.Image{}, thumbing: map[string]bool{}, fetching: map[string]bool{},
 		listings: map[string]model.Listing{}, listing: map[string]bool{}, stale: map[string]bool{},
 		likedLoads: map[string]*likedLoad{}, likedGeneration: map[string]uint64{},
@@ -1818,6 +1821,9 @@ func handleMouse(s *State, m flatte.MouseEvent, fx flatte.Effects[State]) {
 			return // don't scroll settings under an open dropdown
 		}
 		wheel(s, m, fx)
+		return
+	}
+	if m.Action == flatte.MouseMotion && m.Button != flatte.MouseLeft && themeHovered(s, m.Target) {
 		return
 	}
 	if m.Button != flatte.MouseLeft || m.Action != flatte.MousePress {

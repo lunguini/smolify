@@ -209,39 +209,56 @@ func themesKey(s *State, k flatte.KeyEvent) bool {
 	return true
 }
 
-// landOn takes the theme under the cursor once it has rested there for
-// delay: Smolify's own look at once, a Marketplace theme when its color
-// schemes are in (from this session's fetches, or fetched now). Near the
-// end of the list it loads the next page.
+// landOn takes the row under the cursor once the cursor has rested there
+// for delay, so passing over rows (keys held, a pointer swept across)
+// changes nothing: then Smolify's own look, or a Marketplace theme once
+// its color schemes are in. Near the end of the list it loads the next
+// page.
 func landOn(s *State, delay time.Duration) {
 	l := s.market.list
 	if l.Cursor() >= l.Count()-5 && s.market.more && !s.market.loading {
 		loadThemes(s)
 	}
-	if l.Cursor() <= 0 {
-		flatte.Cancel(s.fx, "theme")
-		s.market.fetching = ""
-		chooseLook(s, "")
-		return
-	}
-	i := l.Cursor() - 1
-	if i >= len(s.market.themes) {
-		return
-	}
-	t, src := s.market.themes[i], s.market.source
-	cached := s.market.schemes[t.ID]
-	s.market.fetching = t.ID
-	flatte.Latest(s.fx, "theme", func(ctx context.Context) ([]spicetify.Scheme, error) {
+	row := l.Cursor()
+	flatte.Latest(s.fx, "theme", func(ctx context.Context) (struct{}, error) {
 		if delay > 0 {
 			select {
 			case <-time.After(delay):
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return struct{}{}, ctx.Err()
 			}
 		}
-		if cached != nil {
-			return cached, nil
+		return struct{}{}, nil
+	}, func(s *State, _ struct{}, err error) {
+		if err == nil && s.page == pageThemes && s.market.list.Cursor() == row {
+			takeRow(s, row)
 		}
+	})
+}
+
+// takeRow makes browser row the look: Smolify's own for row 0, else that
+// theme's first scheme, its colors from this session's fetches or fetched
+// now.
+func takeRow(s *State, row int) {
+	if row <= 0 {
+		flatte.Cancel(s.fx, "theme-colors")
+		s.market.fetching = ""
+		chooseLook(s, "")
+		return
+	}
+	i := row - 1
+	if i >= len(s.market.themes) {
+		return
+	}
+	t, src := s.market.themes[i], s.market.source
+	if cached := s.market.schemes[t.ID]; cached != nil {
+		flatte.Cancel(s.fx, "theme-colors")
+		s.market.fetching = ""
+		chooseScheme(s, t, cached, 0)
+		return
+	}
+	s.market.fetching = t.ID
+	flatte.Latest(s.fx, "theme-colors", func(ctx context.Context) ([]spicetify.Scheme, error) {
 		return src.Schemes(ctx, t)
 	}, func(s *State, schemes []spicetify.Scheme, err error) {
 		if s.market.fetching == t.ID {
@@ -314,6 +331,21 @@ func chooseLook(s *State, id string) {
 	st := s.settings
 	st.Theme = id
 	applySettings(s, st)
+}
+
+// themeHovered lands on the browser row under the pointer, taken once the
+// pointer has rested on it for themeHoverDelay (sweeping across rows
+// changes nothing), as the keyboard's cursor would.
+func themeHovered(s *State, target string) bool {
+	i, ok := rowIndex(idThemes, target)
+	if !ok || s.page != pageThemes {
+		return false
+	}
+	if i != s.market.list.Cursor() {
+		s.market.list.Select(i)
+		landOn(s, s.themeHoverDelay)
+	}
+	return true
 }
 
 // themeClicked handles a click in the browser: on a row, landing on it at

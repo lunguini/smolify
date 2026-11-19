@@ -118,8 +118,15 @@ func main() {
 
 // runOptions returns the run options shared by the signed-in and demo modes.
 func runOptions(gui bool) []flatte.Option {
+	// A window reports the pointer resting over things too (the theme
+	// browser takes a theme the pointer rests on); a terminal, clicks
+	// and drags.
+	mouse := flatte.MouseModeCellMotion
+	if gui {
+		mouse = flatte.MouseModeAllMotion
+	}
 	options := []flatte.Option{
-		flatte.WithMouse(flatte.MouseModeCellMotion),
+		flatte.WithMouse(mouse),
 		flatte.WithoutDefaultQuit(),
 		flatte.WithReportFocus(),
 	}
