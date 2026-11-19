@@ -152,30 +152,22 @@ func roomyRows(rows *layout.Col, pal colors) {
 			continue
 		}
 		marked[i] = kind
-		// The outline marks it; its sides take a column of the entry's
-		// padding each, so its content stays put. A selected entry is
-		// filled too, inside its outline only: the entry's own box is not
-		// painted (a theme would fill it under the sides as well).
+		// The outline marks it instead of a fill; its sides take a column of
+		// the entry's padding each, so its content stays put. Its box is not
+		// Selected either, or a theme's cell palette would fill it.
 		r := c.(layout.Row)
 		r.Box.Background, r.Box.Selected = nil, false
-		content := make([]layout.Node, 0, len(r.Children))
+		inner := make([]layout.Node, 0, len(r.Children)+2)
+		inner = append(inner, outlineSide{color: kind.color(pal)})
 		for _, child := range r.Children {
 			if row, ok := child.(layout.Row); ok {
 				row.Box.Background = nil
 				row.PadLeft, row.PadRight = max(row.PadLeft-1, 0), max(row.PadRight-1, 0)
 				child = row
 			}
-			content = append(content, child)
+			inner = append(inner, child)
 		}
-		var fill color.Color
-		if kind == outlineSelected {
-			fill = pal.termSelect
-		}
-		// The row's gap moves inside, as padding: the content keeps its
-		// place, and the fill reaches the sides.
-		inside := layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: r.Gap, PadLeft: r.Gap, PadRight: r.Gap, Box: layout.Box{Background: fill}}, Align: r.Align, Children: content}
-		r.Gap = 0
-		r.Children = []layout.Node{outlineSide{color: kind.color(pal)}, inside, outlineSide{color: kind.color(pal)}}
+		r.Children = append(inner, outlineSide{color: kind.color(pal)})
 		rows.Children[i] = r
 	}
 	// A line of room before the first entry too, for its top edge.

@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"image/color"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatest"
 	"github.com/lunguini/flatte/flatui/layout"
+	"github.com/lunguini/flatte/theme"
 
 	"github.com/lunguini/smolify/internal/model"
 	"github.com/lunguini/smolify/internal/player"
@@ -241,9 +243,9 @@ func TestLikedArtHeartIsCentered(t *testing.T) {
 }
 
 // With a theme's cell palette in effect (as at run time), the selected
-// entry is filled inside its outline only: not under its sides, and not on
-// its edge lines.
-func TestTerminalSelectionFillsInsideItsOutline(t *testing.T) {
+// entry is marked by its accent outline alone: no fill under it or its
+// sides.
+func TestTerminalSelectionIsOutlinedNotFilled(t *testing.T) {
 	s := sampleApp().State
 	layout.UseCellTheme(&s.look().Design.Dark)
 	defer layout.UseCellTheme(nil)
@@ -258,19 +260,17 @@ func TestTerminalSelectionFillsInsideItsOutline(t *testing.T) {
 	if row < 1 {
 		t.Fatalf("no selected row:\n%s", plain(fr))
 	}
-	sel := s.look().colors().termSelect
-	fill := fmt.Sprintf("48;2;%d;%d;%d", sel.R, sel.G, sel.B)
-	// The center pane's outline side, then the fill right inside it.
-	side := strings.LastIndex(lines[row], "│"+"\x1b")
-	if !strings.Contains(lines[row], fill) {
-		t.Errorf("selected row not filled: %q", lines[row])
+	c := s.look().colors()
+	accent := fmt.Sprintf("38;2;%d;%d;%dm│", c.accent.R, c.accent.G, c.accent.B)
+	if !strings.Contains(lines[row], accent) {
+		t.Errorf("selected row not outlined in the accent: %q", lines[row])
 	}
-	if side < 0 {
-		t.Fatalf("no outline side on the selected row: %q", lines[row])
-	}
-	for _, edge := range []int{row - 1, row + 2} {
-		if strings.Contains(lines[edge], fill) {
-			t.Errorf("edge line %d filled: %q", edge, lines[edge])
+	for _, fill := range []color.NRGBA{c.termSelect, theme.Over(s.look().Design.Dark.SelectionActive, theme.Over(s.look().Design.Dark.Content, s.look().Design.Dark.Canvas))} {
+		bg := fmt.Sprintf("48;2;%d;%d;%dm", fill.R, fill.G, fill.B)
+		for _, l := range lines[row-1 : row+3] {
+			if strings.Contains(l, bg) {
+				t.Errorf("selected entry filled (%s): %q", bg, l)
+			}
 		}
 	}
 	// No outline side sits on any background.
