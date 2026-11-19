@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -236,5 +237,47 @@ func TestLikedArtHeartIsCentered(t *testing.T) {
 	above, below := top-b.Min.Y, b.Max.Y-1-bottom
 	if d := above - below; d < -2 || d > 2 {
 		t.Fatalf("heart from line %d to %d: %d above, %d below", top, bottom, above, below)
+	}
+}
+
+// With a theme's cell palette in effect (as at run time), the selected
+// entry is filled inside its outline only: not under its sides, and not on
+// its edge lines.
+func TestTerminalSelectionFillsInsideItsOutline(t *testing.T) {
+	s := sampleApp().State
+	layout.UseCellTheme(&s.look().Design.Dark)
+	defer layout.UseCellTheme(nil)
+	fr, _ := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 120}), 120, 34)
+	lines, plainLines := strings.Split(fr.Content, "\n"), strings.Split(plain(fr), "\n")
+	row := -1
+	for i, l := range plainLines {
+		if strings.Contains(l, "Low Tide") {
+			row = i
+		}
+	}
+	if row < 1 {
+		t.Fatalf("no selected row:\n%s", plain(fr))
+	}
+	sel := s.look().colors().termSelect
+	fill := fmt.Sprintf("48;2;%d;%d;%d", sel.R, sel.G, sel.B)
+	// The center pane's outline side, then the fill right inside it.
+	side := strings.LastIndex(lines[row], "│"+"\x1b")
+	if !strings.Contains(lines[row], fill) {
+		t.Errorf("selected row not filled: %q", lines[row])
+	}
+	if side < 0 {
+		t.Fatalf("no outline side on the selected row: %q", lines[row])
+	}
+	for _, edge := range []int{row - 1, row + 2} {
+		if strings.Contains(lines[edge], fill) {
+			t.Errorf("edge line %d filled: %q", edge, lines[edge])
+		}
+	}
+	// No outline side sits on any background.
+	onFill := regexp.MustCompile(`48;2;\d+;\d+;\d+m│`)
+	for _, l := range lines[row : row+2] {
+		if onFill.MatchString(l) {
+			t.Errorf("a side drawn on a fill: %q", l)
+		}
 	}
 }
