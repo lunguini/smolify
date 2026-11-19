@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -146,7 +147,8 @@ func TestEqualizerMovesWhilePlayingAndRests(t *testing.T) {
 func TestPlayingRowIsDimlyOutlinedNotWashed(t *testing.T) {
 	s := sampleApp().State
 	fr, _ := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 160}), 160, 40)
-	if !strings.Contains(fr.Content, "38;2;79;68;117m╭") {
+	edge := s.look().colors().playingEdge
+	if !strings.Contains(fr.Content, fmt.Sprintf("38;2;%d;%d;%dm╭", edge.R, edge.G, edge.B)) {
 		t.Fatal("no dim outline on the playing row")
 	}
 	if !strings.Contains(plain(fr), equalizerBars(0, s.playing)) {

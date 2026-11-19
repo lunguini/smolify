@@ -17,9 +17,11 @@ import (
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui"
 	"github.com/lunguini/flatte/flatui/layout"
+	"github.com/lunguini/flatte/theme"
 	"github.com/lunguini/flatte/window"
 
 	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/spicetify"
 	"github.com/lunguini/smolify/internal/spotify"
 )
 
@@ -43,8 +45,33 @@ func TestWindowSnapshot(t *testing.T) {
 	if err := png.Encode(f, img); err != nil {
 		t.Fatal(err)
 	}
-	// Liked Songs and a playlist without a cover, on Smolify's own art.
+	// The same in a Spicetify color scheme, and Settings offering it.
 	s := a.State
+	nord := SpicetifyLook(spicetify.Scheme{Theme: "Nord", Name: "Nord", Colors: map[string]color.NRGBA{
+		"text": theme.Hex("#d8dee9"), "subtext": theme.Hex("#abb1bb"), "main": theme.Hex("#2e3440"), "sidebar": theme.Hex("#2b303b"),
+		"player": theme.Hex("#242933"), "card": theme.Hex("#3b4252"), "button": theme.Hex("#88c0d0"), "button-active": theme.Hex("#8fbcbb"),
+		"selected-row": theme.Hex("#4c566a"), "notification-error": theme.Hex("#bf616a"),
+	}})
+	WithLooks(a, []Look{nord})
+	s.settings.Theme = nord.ID
+	s.settingTheme.Select(1)
+	for _, shot := range []struct {
+		name string
+		page page
+	}{{"smolify-spicetify.png", pageLibrary}, {"smolify-spicetify-settings.png", pageSettings}} {
+		s.page = shot.page
+		img, err := window.Snapshot(a, snapOptions(110, 40), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f, err := os.Create(filepath.Join(dir, shot.name)); err == nil {
+			png.Encode(f, img)
+			f.Close()
+		}
+	}
+	s.page, s.settings.Theme = pageLibrary, ""
+	s.settingTheme.Select(0)
+	// Liked Songs and a playlist without a cover, on Smolify's own art.
 	s.username = "adrian"
 	s.discovery.Pages = make(map[string]discoveryPage)
 	// Settings, with the search field focused to show its focused look.
@@ -306,7 +333,7 @@ func sampleApp() flatte.App[State] {
 			f.Close()
 		}
 	}
-	s.tints["c:1"] = tintOf(s.covers["c:1"])
+	s.tints["c:1"] = coverAverage(s.covers["c:1"])
 	s.thumbs["c:1"], s.thumbs["c:2"], s.thumbs["c:t"] = s.covers["c:1"], s.covers["c:2"], s.covers["c:t"]
 	s.covers["c:2"] = art(color.RGBA{30, 200, 140, 255}, color.RGBA{20, 40, 60, 255})
 	s.covers["c:t"] = art(color.RGBA{250, 180, 60, 255}, color.RGBA{120, 30, 60, 255})

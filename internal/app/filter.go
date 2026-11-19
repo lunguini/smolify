@@ -18,6 +18,7 @@ const (
 )
 
 func filterView(s *State, g bool) layout.Node {
+	pal := s.look().colors()
 	focused := s.focus == paneTrackFilter
 	if !s.trackFilterOpen && strings.TrimSpace(s.trackFilter.Value) == "" && !focused {
 		size := layout.NodeBase{ID: idTrackFilterToggle, Tooltip: "Find in playlist (⌘⇧F)", W: layout.Fixed(3), H: layout.Fixed(1)}
@@ -27,7 +28,7 @@ func filterView(s *State, g bool) layout.Node {
 		}
 		// A terminal frames it as the search field is.
 		size.W, size.H, size.PadLeft, size.PadRight = layout.Auto(), layout.Fixed(3), 1, 1
-		size.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+		size.Box = layout.Box{Border: layout.BorderRounded, BorderColor: pal.border}
 		return layout.Button{NodeBase: size, Label: "⌕ Find", Plain: true}
 	}
 	field := s.trackFilter.Layout(idTrackFilter, focused)
@@ -36,9 +37,9 @@ func filterView(s *State, g bool) layout.Node {
 	field.W = layout.Grow(1)
 	icon := layout.Icon{NodeBase: layout.NodeBase{W: layout.Fixed(2)}, Name: layout.IconSearch, Text: "⌕ ", Style: subtle}
 	base := layout.NodeBase{ID: idTrackFilterBox, W: layout.Fixed(filterWidth(s)), H: layout.Fixed(3), Gap: 1, PadLeft: 1, PadRight: 1,
-		Box: layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}}
+		Box: layout.Box{Border: layout.BorderRounded, BorderColor: pal.border}}
 	if focused {
-		base.Box.BorderColor = brand
+		base.Box.BorderColor = pal.accent
 	}
 	icon.H = layout.Fixed(1)
 	if g {

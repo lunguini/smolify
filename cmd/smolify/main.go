@@ -24,6 +24,7 @@ import (
 	"github.com/lunguini/smolify/internal/demo"
 	"github.com/lunguini/smolify/internal/librarycache"
 	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/spicetify"
 	"github.com/lunguini/smolify/internal/spotify"
 )
 
@@ -63,7 +64,7 @@ func main() {
 	if *demoMode {
 		backend := demo.New()
 		go backend.Run(ctx)
-		a := app.New(backend, backend, backend, nil)
+		a := app.WithLooks(app.New(backend, backend, backend, nil), spicetifyLooks())
 		if gui {
 			a = app.Windowed(a)
 		}
@@ -97,7 +98,7 @@ func main() {
 		defer writeHeapProfile(*heapProfile)
 	}
 	web := &spotify.Client{Token: p.Token, ClientToken: p.ClientToken}
-	a := app.WithCache(app.WithSettings(app.New(p, app.HTTPImages{}, web, debug), settingsPath, settings), cacheDir)
+	a := app.WithCache(app.WithSettings(app.WithLooks(app.New(p, app.HTTPImages{}, web, debug), spicetifyLooks()), settingsPath, settings), cacheDir)
 	if gui {
 		a = app.Windowed(a)
 	}
@@ -119,6 +120,28 @@ func runOptions(gui bool) []flatte.Option {
 		return append(options, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
 	}
 	return append(options, media.Controls{})
+}
+
+// spicetifyLooks are the color schemes of the themes installed for
+// Spicetify, from the first of its config directories that exists.
+func spicetifyLooks() []app.Look {
+	home, _ := os.UserHomeDir()
+	for _, dir := range spicetify.ConfigDirs(runtime.GOOS, os.Getenv, home) {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			continue
+		}
+		installed, err := spicetify.Load(os.DirFS(dir))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "smolify: spicetify themes:", err)
+			return nil
+		}
+		looks := make([]app.Look, len(installed.Schemes))
+		for i, sc := range installed.Schemes {
+			looks[i] = app.SpicetifyLook(sc)
+		}
+		return looks
+	}
+	return nil
 }
 
 // logMemory writes the Go runtime's memory figures to w every 10 seconds:

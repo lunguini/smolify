@@ -158,7 +158,8 @@ type State struct {
 	liked  map[string]bool
 	asking map[string]bool
 
-	// covers are fetched cover images by URL, and tints their header colors;
+	// covers are fetched cover images by URL, and tints their average colors
+	// (a header's tint, mixed into the look as drawn);
 	// fetching marks requests in flight.
 	covers map[string]image.Image
 	tints  map[string]color.Color
@@ -191,12 +192,16 @@ type State struct {
 	// deviceName edits the device name; settingCursor is the row
 	// the keyboard is on and settingsScroll the page's scroll (at most
 	// settingsMax lines).
-	settings                    Settings
-	activeAudio                 model.Audio
-	applyingAudio               bool
-	settingQuality              flatui.Select
-	settingCrossfade            flatui.Select
-	settingBackend              flatui.Select
+	settings         Settings
+	activeAudio      model.Audio
+	applyingAudio    bool
+	settingQuality   flatui.Select
+	settingCrossfade flatui.Select
+	settingBackend   flatui.Select
+	// looks are the looks Settings offers, Smolify's own first; settingTheme
+	// picks among them (Settings.Theme holds the choice).
+	looks                       []Look
+	settingTheme                flatui.Select
 	settingsStore               SettingsStore
 	deviceName                  flatui.TextField
 	settingCursor               int
@@ -381,6 +386,7 @@ func New(be Backend, img Images, web Web, debug io.Writer) flatte.App[State] {
 		liked: map[string]bool{}, asking: map[string]bool{}, likeChanges: map[string]*likeChange{},
 		page: pageHome, shown: uriHome, focus: paneTracks,
 		settings:      DefaultSettings(),
+		looks:         []Look{SmolifyLook()},
 		cacheRevision: map[string]uint64{},
 	}
 	s.trackSort.SetOptions(regularSortOptions)
@@ -974,7 +980,7 @@ func fetchCover(s *State, url string) {
 			return fetched{}, err
 		}
 		im = shrink(im, coverPixels)
-		return fetched{im, tintOf(im)}, nil
+		return fetched{im, coverAverage(im)}, nil
 	}, func(s *State, f fetched, err error) {
 		delete(s.fetching, url)
 		if err == nil && f.im != nil {

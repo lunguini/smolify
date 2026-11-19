@@ -29,6 +29,9 @@ func TestPlaylistHeaderIsFlushAndSummaryStaysByTitle(t *testing.T) {
 }
 
 func TestGUIRowsHaveVerticalRoomAndTerminalDensityStays(t *testing.T) {
+	// A GUI scene of its own: no terminal cell theme an earlier test's
+	// driver left installed (it is process-wide).
+	layout.UseCellTheme(nil)
 	s := sampleApp().State
 	scene := layout.LayoutScene(View(s, flatte.RenderContext{Graphical: true}).Root, 1100, 800, layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32})
 	if r := scene.Rects[idTracks+":0"]; r.H != 48 {

@@ -57,6 +57,16 @@ headless PulseAudio null sink, with no Spotify account, run:
 
 The script uses Docker to build the app and run the headless check.
 
+## Themes
+
+Smolify draws in its own look by default. If you use
+[Spicetify](https://spicetify.app), the color schemes of your installed
+Spicetify themes show up under Settings › Appearance › Theme, and switching
+restyles Smolify right away, in the terminal and in the window. Smolify reads
+each theme's `color.ini` from Spicetify's config folder (`SPICETIFY_CONFIG`
+overrides where it looks). It ignores `user.css`, which styles Spotify's own
+interface.
+
 ## Build
 
 ```bash

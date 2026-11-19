@@ -4,6 +4,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"context"
 	"errors"
+	"image/color"
 	"runtime"
 	"slices"
 	"strconv"
@@ -45,6 +46,10 @@ type Settings struct {
 	// Images is how a terminal shows covers: imagesPictures,
 	// imagesHalfBlocks, or imagesOff. A window always shows pictures.
 	Images int `json:"terminal_images"`
+
+	// Theme is the look's ID: "" for Smolify's own, or a Spicetify scheme's
+	// "Theme/Scheme". A look no longer installed draws as Smolify's own.
+	Theme string `json:"theme,omitempty"`
 }
 
 // The terminal image choices: real pictures where the terminal can show
@@ -72,9 +77,50 @@ func WithSettingsStore(app flatte.App[State], store SettingsStore, st Settings) 
 	s.settings, s.settingsStore, s.compact = st, store, st.Compact
 	s.activeAudio = st.Audio()
 	initAudioSettings(s)
+	initThemeSetting(s)
 	s.deviceName = flatui.TextField{Value: st.DeviceName, Cursor: len(st.DeviceName)}
 	return app
 }
+
+// WithLooks offers looks besides Smolify's own in Settings: the color
+// schemes the host found installed for Spicetify.
+func WithLooks(app flatte.App[State], looks []Look) flatte.App[State] {
+	s := app.State
+	s.looks = append([]Look{SmolifyLook()}, looks...)
+	initThemeSetting(s)
+	return app
+}
+
+func initThemeSetting(s *State) {
+	names := make([]string, len(s.looks))
+	for i, l := range s.looks {
+		names[i] = l.Name
+	}
+	s.settingTheme.SetOptions(names)
+	s.settingTheme.Select(lookIndex(s))
+}
+
+// lookIndex is the chosen look's place among s.looks (0, Smolify's own,
+// when it is not installed).
+func lookIndex(s *State) int {
+	for i, l := range s.looks {
+		if l.ID == s.settings.Theme {
+			return i
+		}
+	}
+	return 0
+}
+
+// look is the look s draws in.
+func (s *State) look() *Look {
+	if len(s.looks) == 0 {
+		return &smolifyLook
+	}
+	return &s.looks[lookIndex(s)]
+}
+
+// smolifyLook is the look of a State made without New (in tests).
+var smolifyLook = SmolifyLook()
 
 func initAudioSettings(s *State) {
 	s.settingQuality.SetOptions([]string{"Low · 96 kbps", "Normal · 160 kbps", "High · 320 kbps"})
@@ -146,26 +192,27 @@ const (
 	setAutoplay     = "set:autoplay"
 	setApplyAudio   = "set:apply-audio"
 	setDeviceName   = "set:device-name"
+	setTheme        = "set:theme"
 	setCompact      = "set:compact"
 	setImages       = "set:images"
 	setSignOut      = "set:sign-out"
 )
 
 // settingIDs are the rows in page order.
-var settingIDs = []string{setNotifyErrors, setNotifyTracks, setBackend, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setDeviceName, setCompact, setImages, setSignOut}
+var settingIDs = []string{setNotifyErrors, setNotifyTracks, setBackend, setQuality, setNormalise, setCrossfade, setAutoplay, setApplyAudio, setTheme, setDeviceName, setCompact, setImages, setSignOut}
 
 // settingRows are the rows s shows: a window has no terminal images, and
 // a browser no audio output to choose.
 func settingRows(s *State) []string { return settingRowsFor(s, runtime.GOOS) }
 
 func settingRowsFor(s *State, goos string) []string {
-	noOutput := len(model.AudioBackendOptions(goos)) == 0
-	if !s.windowed && !noOutput {
+	noOutput, oneLook := len(model.AudioBackendOptions(goos)) == 0, len(s.looks) < 2
+	if !s.windowed && !noOutput && !oneLook {
 		return settingIDs
 	}
 	rows := make([]string, 0, len(settingIDs))
 	for _, id := range settingIDs {
-		if (id == setImages && s.windowed) || (id == setBackend && noOutput) {
+		if (id == setImages && s.windowed) || (id == setBackend && noOutput) || (id == setTheme && oneLook) {
 			continue
 		}
 		rows = append(rows, id)
@@ -222,6 +269,11 @@ func changeSetting(s *State, id string, step int) {
 			return
 		}
 		st.AudioBackend = backends[wrap(audioBackendIndex(backends, st.AudioBackend)+step, len(backends))]
+	case setTheme:
+		if len(s.looks) == 0 {
+			return
+		}
+		st.Theme = s.looks[wrap(lookIndex(s)+step, len(s.looks))].ID
 	case setApplyAudio:
 		applyAudioSettings(s)
 		return
@@ -251,6 +303,8 @@ func chooseSetting(s *State, id string, n int) {
 		st.Images = imageModes[n].value
 	case id == setBackend && n >= 0 && n < len(model.AudioBackendOptions(runtime.GOOS)):
 		st.AudioBackend = model.AudioBackendOptions(runtime.GOOS)[n]
+	case id == setTheme && n >= 0 && n < len(s.looks):
+		st.Theme = s.looks[n].ID
 	default:
 		return
 	}
@@ -295,6 +349,7 @@ func applySettings(s *State, st Settings) {
 	s.settingQuality.Select(pickOf(qualities, st.Bitrate))
 	s.settingCrossfade.Select(pickOf(crossfades, st.Crossfade))
 	s.settingBackend.Select(audioBackendIndex(model.AudioBackendOptions(runtime.GOOS), st.AudioBackend))
+	s.settingTheme.Select(lookIndex(s))
 	if st.DeviceName != old.DeviceName {
 		name := st.DeviceName
 		sendLatest(s, "rename-device", func(ctx context.Context, be Backend) error { return be.SetDeviceName(ctx, name) })
@@ -370,10 +425,11 @@ func settingsKey(s *State, k flatte.KeyEvent) bool {
 		}
 		changeSetting(s, settingIDs[i], 1)
 	case flatte.KeyEscape:
-		if s.settingQuality.IsOpen() || s.settingCrossfade.IsOpen() || s.settingBackend.IsOpen() {
+		if s.settingQuality.IsOpen() || s.settingCrossfade.IsOpen() || s.settingBackend.IsOpen() || s.settingTheme.IsOpen() {
 			s.settingQuality.Close()
 			s.settingCrossfade.Close()
 			s.settingBackend.Close()
+			s.settingTheme.Close()
 			return true
 		}
 		travel(s, false)
@@ -392,6 +448,8 @@ func settingsChoiceKey(s *State, id string, key flatte.Key) bool {
 		selectChoice = &s.settingCrossfade
 	case setBackend:
 		selectChoice = &s.settingBackend
+	case setTheme:
+		selectChoice = &s.settingTheme
 	default:
 		return false
 	}
@@ -461,6 +519,7 @@ func deviceKey(s *State, k flatte.KeyEvent, fx flatte.Effects[State]) {
 // settingsView is the Settings page: sections of rows, each a name and a
 // line about it on the left and its control on the right.
 func settingsView(s *State, g bool, width int) layout.Node {
+	pal := s.look().colors()
 	st := s.settings
 	settingIDs := settingRows(s)
 	cursor := ""
@@ -468,7 +527,7 @@ func settingsView(s *State, g bool, width int) layout.Node {
 		cursor = settingIDs[s.settingCursor]
 	}
 	row := func(id, label, about string, control layout.Node) layout.Node {
-		r := layout.Row{NodeBase: layout.NodeBase{ID: id, Gap: 2, PadLeft: 1, PadRight: 1, Box: layout.Box{Hover: hoverBg, Round: true, Selected: id == cursor, InsetY: rowGap}}, Align: layout.AlignCenter, Children: []layout.Node{
+		r := layout.Row{NodeBase: layout.NodeBase{ID: id, Gap: 2, PadLeft: 1, PadRight: 1, Box: layout.Box{Hover: pal.hover, Round: true, Selected: id == cursor, InsetY: rowGap}}, Align: layout.AlignCenter, Children: []layout.Node{
 			twoLines(layout.NodeBase{W: layout.Grow(1)}, label, layout.TextStyle{}, about, secondary),
 			control,
 		}}
@@ -477,7 +536,7 @@ func settingsView(s *State, g bool, width int) layout.Node {
 			r.H = layout.Points(48)
 		} else {
 			// A faint rule under each setting, so a control pairs with its name.
-			return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{r, settingsRule{}}}
+			return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{r, settingsRule{color: pal.rule}}}
 		}
 		return r
 	}
@@ -490,7 +549,7 @@ func settingsView(s *State, g bool, width int) layout.Node {
 	section := func(title string) layout.Node {
 		heading := layout.Node(layout.Label{Text: title, Style: caption})
 		if !g { // the heading leads a rule across the section
-			heading = layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: 1}, Children: []layout.Node{heading, newHRule(nil)}}
+			heading = layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: 1}, Children: []layout.Node{heading, newHRule(nil, pal.border)}}
 		}
 		return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), PadTop: pick(g, 2, 1), PadBottom: 1, PadLeft: 1}, Children: []layout.Node{heading}}
 	}
@@ -502,7 +561,7 @@ func settingsView(s *State, g bool, width int) layout.Node {
 	}
 	audioDirty := s.settings.Audio() != s.activeAudio
 	body := []layout.Node{
-		layout.Label{Text: "Settings", Style: layout.TextStyle{Bold: true, Size: 30, Fg: white}},
+		layout.Label{Text: "Settings", Style: layout.TextStyle{Bold: true, Size: 30, Color: layout.ColorPrimary}},
 		section("NOTIFICATIONS"),
 		row(setNotifyErrors, "Errors and confirmations", "As notifications instead of on screen, in a window", toggle(setNotifyErrors, st.NotifyErrors)),
 		row(setNotifyTracks, "Now playing", "Each new song while Smolify is in the background", toggle(setNotifyTracks, st.NotifyTracks)),
@@ -518,6 +577,12 @@ func settingsView(s *State, g bool, width int) layout.Node {
 		row(setCrossfade, "Crossfade", "Blend the end of a song into the next", s.settingCrossfade.Layout(setCrossfade+":select", s.focus == paneSettings && cursor == setCrossfade)),
 		row(setAutoplay, "Autoplay", "Keep playing similar songs when a list ends", toggle(setAutoplay, st.Autoplay)),
 		row(setApplyAudio, "Apply audio changes", "Restart the current player to use these choices", layout.Button{NodeBase: layout.NodeBase{ID: setApplyAudio + ":button"}, Label: applyLabel, Default: !s.applyingAudio && audioDirty, Disabled: s.applyingAudio || !audioDirty}),
+	)
+	if slices.Contains(settingIDs, setTheme) {
+		body = append(body, section("APPEARANCE"),
+			row(setTheme, "Theme", "Smolify's own, or a color scheme installed for Spicetify", s.settingTheme.Layout(setTheme+":select", s.focus == paneSettings && cursor == setTheme)))
+	}
+	body = append(body,
 		section("DEVICE AND ACCOUNT"),
 		row(setDeviceName, "Device name", "How Smolify shows in Spotify Connect (Enter to keep)", name),
 		row(setCompact, "Compact rows", "One line per song", toggle(setCompact, st.Compact)),
@@ -527,14 +592,14 @@ func settingsView(s *State, g bool, width int) layout.Node {
 		for n, m := range imageModes {
 			b := layout.Button{NodeBase: layout.NodeBase{ID: setImages + ":" + strconv.Itoa(n)}, Label: m.label, Plain: m.value != st.Images, Style: subtle}
 			if m.value == st.Images {
-				b.Style = layout.TextStyle{Fg: brand, Bold: true}
+				b.Style = layout.TextStyle{Color: layout.ColorAccent, Bold: true}
 			}
 			modes.Children = append(modes.Children, b)
 		}
 		body = append(body, row(setImages, "Images", "Covers as pictures (where the terminal can), colored blocks, or none", modes))
 	}
 	body = append(body,
-		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Fg: danger}, Disabled: !supportsSignOut(s)}),
+		row(setSignOut, "Sign out", "Forget this device's sign-in", layout.Button{NodeBase: layout.NodeBase{ID: setSignOut + ":button"}, Label: "Sign Out", Style: layout.TextStyle{Color: layout.ColorDanger}, Disabled: !supportsSignOut(s)}),
 	)
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Grow(1), Pad: pick(g, 2, 1)}, Children: []layout.Node{
 		layout.Scroll{NodeBase: layout.NodeBase{ID: idSettingsScroll, W: layout.Grow(1), H: layout.Grow(1)}, OffsetY: s.settingsScroll, Child: layout.Col{NodeBase: layout.NodeBase{ID: idSettingsContent, W: settingsWidth(g, width)}, Children: body}},
@@ -607,6 +672,8 @@ func settingClicked(s *State, target string) bool {
 		selectChoice = &s.settingCrossfade
 	case setBackend:
 		selectChoice = &s.settingBackend
+	case setTheme:
+		selectChoice = &s.settingTheme
 	}
 	if selectChoice != nil && selectChoice.Click(target, id+":select") {
 		for i, sid := range settingRows(s) {
@@ -623,6 +690,7 @@ func settingClicked(s *State, target string) bool {
 	s.settingQuality.Close()
 	s.settingCrossfade.Close()
 	s.settingBackend.Close()
+	s.settingTheme.Close()
 	for i, sid := range settingRows(s) {
 		if sid == id {
 			s.settingCursor = i
@@ -636,7 +704,7 @@ func settingClicked(s *State, target string) bool {
 	switch {
 	case id == setDeviceName:
 		s.focus = paneDevice
-	case part == "" && (id == setQuality || id == setCrossfade || id == setBackend):
+	case part == "" && (id == setQuality || id == setCrossfade || id == setBackend || id == setTheme):
 		// A click on the row, not a choice: nothing to change.
 	default:
 		changeSetting(s, id, 1)
@@ -645,13 +713,13 @@ func settingClicked(s *State, target string) bool {
 }
 
 // settingsRule is the faint line under a setting in a terminal.
-type settingsRule struct{ layout.NodeBase }
+type settingsRule struct {
+	layout.NodeBase
+	color color.Color
+}
 
 func (settingsRule) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
 
-func (settingsRule) Render(r layout.Rect) string {
-	return lipgloss.NewStyle().Foreground(settingsRuleColor).Render(" " + strings.Repeat("┄", max(r.W-2, 0)) + " ")
+func (sr settingsRule) Render(r layout.Rect) string {
+	return lipgloss.NewStyle().Foreground(sr.color).Render(" " + strings.Repeat("┄", max(r.W-2, 0)) + " ")
 }
-
-// settingsRuleColor is fainter than the dividers: it groups, not splits.
-var settingsRuleColor = lipgloss.Color("#2c2c2c")

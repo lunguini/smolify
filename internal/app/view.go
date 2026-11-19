@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
-
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatui/layout"
 
@@ -69,11 +67,11 @@ const (
 // rail is the library rail's width in columns.
 func rail(g bool) int { return pick(g, railWidth, termRailWidth) }
 
-// card is a rounded panel on the window (cardBg unless nb has a
-// background).
+// card is a rounded panel on the window (the look's Content unless nb has
+// a background).
 func card(nb layout.NodeBase, children ...layout.Node) layout.Col {
-	if nb.Box.Background == nil {
-		nb.Box.Background = cardBg
+	if nb.Box.Background == nil && nb.Box.Fill == layout.FillNone {
+		nb.Box.Fill = layout.FillContent
 	}
 	nb.Box.Round = true
 	return layout.Col{NodeBase: nb, Children: children}
@@ -97,7 +95,7 @@ var navRules = map[int]string{navLines: "┤", 2*navLines + 1: "┤"}
 func navKey(s *State, id, label string, p page) layout.Node {
 	b := layout.Button{NodeBase: layout.NodeBase{ID: id, W: layout.Grow(1), H: layout.Fixed(navLines), PadLeft: 2, PadTop: 1}, Label: label, Plain: true, Style: subtle}
 	if s.page == p {
-		b.Style = layout.TextStyle{Bold: true, Fg: brand}
+		b.Style = layout.TextStyle{Bold: true, Color: layout.ColorAccent}
 	}
 	if s.web == nil && p == pageSearch {
 		b.Disabled = true
@@ -108,6 +106,7 @@ func navKey(s *State, id, label string, p page) layout.Node {
 // terminalRoot is the signed-in screen in a terminal: sections split by
 // single lines that run to the terminal's edges, which frame the whole.
 func terminalRoot(s *State, width int) layout.Node {
+	pal := s.look().colors()
 	pad := func(n layout.Node) layout.Node {
 		return layout.Col{NodeBase: layout.NodeBase{PadLeft: 1, PadRight: 1}, Children: []layout.Node{n}}
 	}
@@ -115,10 +114,10 @@ func terminalRoot(s *State, width int) layout.Node {
 		terminalTopBar(s),
 		layout.Row{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{
 			railView(s, false),
-			newVRule(navRules),
+			newVRule(navRules, pal.border),
 			layout.Col{NodeBase: layout.NodeBase{ID: "center-card", W: layout.Grow(1)}, Children: []layout.Node{centerView(s, false, width)}},
 		}},
-		newHRule(map[int]string{termRailWidth: "┴"}),
+		newHRule(map[int]string{termRailWidth: "┴"}, pal.border),
 		pad(playerBar(s, false, width)),
 	}}
 }
@@ -127,7 +126,7 @@ func terminalRoot(s *State, width int) layout.Node {
 // library, the selected playlist, and the player bar.
 func View(s *State, ctx flatte.RenderContext) flatte.Frame {
 	g := ctx.Graphical
-	frame := flatte.Frame{Title: "Smolify"}
+	frame := flatte.Frame{Title: "Smolify", Theme: &s.look().Design}
 	switch {
 	case !s.ready && s.pairing.Code != "":
 		frame.Root = pairingView(s)
@@ -185,7 +184,7 @@ func pairingView(s *State) layout.Node {
 		layout.Label{},
 		layout.Label{Wrap: true, Text: "Approve Smolify as a speaker for your account. Open catalog.com/pair and enter:"},
 		layout.Label{},
-		layout.Label{Text: spaced(p.Code), Selectable: true, Style: layout.TextStyle{Bold: true, Size: 34, Fg: brand}},
+		layout.Label{Text: spaced(p.Code), Selectable: true, Style: layout.TextStyle{Bold: true, Size: 34, Color: layout.ColorAccent}},
 		layout.Label{},
 		layout.Row{NodeBase: layout.NodeBase{Gap: 2}, Children: []layout.Node{
 			layout.Button{NodeBase: layout.NodeBase{ID: idOpenPair, Tooltip: p.URL}, Label: "Open in Browser", Default: true},
@@ -202,13 +201,14 @@ func spaced(code string) string { return strings.Join(strings.Split(code, ""), "
 // railView is the navigation and the library: each list with its cover,
 // the playing one in violet.
 func railView(s *State, g bool) layout.Node {
+	pal := s.look().colors()
 	lib := s.library()
 	rows := s.rail.Rows(idRail, func(i int, selected bool) layout.Node {
 		pl := lib[i]
 		name := layout.TextStyle{}
 		playing := pl.URI == s.context && s.track != nil
 		if playing {
-			name.Fg = brand
+			name.Color = layout.ColorAccent
 		}
 		about := "Playlist"
 		if o := ownerName(pl.Owner, s.username); o != "" {
@@ -227,14 +227,14 @@ func railView(s *State, g bool) layout.Node {
 			row.PadTop, row.PadBottom = 1, 1
 		}
 		if playing {
-			row.Children = append(row.Children, layout.Icon{Name: layout.IconSpeaker, Text: "♪ ", Style: layout.TextStyle{Fg: brand}})
+			row.Children = append(row.Children, layout.Icon{Name: layout.IconSpeaker, Text: "♪ ", Style: layout.TextStyle{Color: layout.ColorAccent}})
 		}
 		return row
 	})
 	rows.ID, rows.W, rows.H = idRail, layout.Grow(1), layout.Grow(1)
-	withHover(&rows, s.page == pageLibrary, g)
+	withHover(&rows, s.page == pageLibrary, g, pal)
 	if !g {
-		roomyRows(&rows) // a line between entries, easier to read
+		roomyRows(&rows, pal) // a line between entries, easier to read
 	} // the center shows Home or search, not a list
 	count := ""
 	if n := len(lib); n > 0 {
@@ -252,16 +252,16 @@ func railView(s *State, g bool) layout.Node {
 	if !g { // the app's name is in the top bar; a line splits the sections
 		return layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(termRailWidth)}, Children: []layout.Node{
 			navKey(s, idHome, "⌂ Home", pageHome),
-			newHRule(nil),
+			newHRule(nil, pal.border),
 			navKey(s, idSearch, "⌕ Search", pageSearch),
-			newHRule(nil),
+			newHRule(nil, pal.border),
 			layout.Col{NodeBase: layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1}, Children: library},
 		}}
 	}
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Fixed(railWidth), Gap: 1}, Children: []layout.Node{
 		brandMark(g),
-		card(layout.NodeBase{PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1, Box: layout.Box{Background: railBg}}, nav...),
-		card(layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1, Box: layout.Box{Background: railBg}}, library...),
+		card(layout.NodeBase{PadLeft: 1, PadRight: 1, PadTop: 1, PadBottom: 1, Box: layout.Box{Background: pal.rail}}, nav...),
+		card(layout.NodeBase{H: layout.Grow(1), PadLeft: 1, PadRight: 1, PadTop: 1, Box: layout.Box{Background: pal.rail}}, library...),
 	}}
 }
 
@@ -310,13 +310,13 @@ func twoLines(nb layout.NodeBase, title string, titleStyle layout.TextStyle, sub
 
 // withHover gives a list's rows a hover fill and rounded corners, and
 // drops their selection unless selected.
-func withHover(rows *layout.Col, selected, g bool) {
+func withHover(rows *layout.Col, selected, g bool, pal colors) {
 	for i, c := range rows.Children {
 		if r, ok := c.(layout.Row); ok {
-			r.Box.Hover, r.Box.Round, r.Box.InsetY = hoverBg, true, rowGap
+			r.Box.Hover, r.Box.Round, r.Box.InsetY = pal.hover, true, rowGap
 			r.Box.Selected = r.Box.Selected && selected
 			if r.Box.Selected && !g { // a terminal draws no selection of its own
-				r.Box.Background = termSelectBg
+				r.Box.Background = pal.termSelect
 			}
 			rows.Children[i] = r
 		}
@@ -326,20 +326,21 @@ func withHover(rows *layout.Col, selected, g bool) {
 // navItem is a rail entry for a page, white when shown. icon draws in a
 // window, text in a terminal (two columns: glyph, space).
 func navItem(s *State, g bool, id string, icon layout.IconName, text, label string, p page) layout.Node {
+	pal := s.look().colors()
 	st := subtle
 	if s.page == p {
-		st = layout.TextStyle{Bold: true, Fg: white}
+		st = layout.TextStyle{Bold: true, Color: layout.ColorPrimary}
 	}
 	if s.web == nil && p == pageSearch {
 		st = subtle
 	}
-	row, icn := layout.NodeBase{ID: id, Gap: 1, PadLeft: 1, Box: layout.Box{Hover: hoverBg, Round: true}}, layout.NodeBase{}
+	row, icn := layout.NodeBase{ID: id, Gap: 1, PadLeft: 1, Box: layout.Box{Hover: pal.hover, Round: true}}, layout.NodeBase{}
 	if g {
 		row.H, icn.W, icn.H = layout.Points(32), layout.Points(24), layout.Points(24)
 	}
 	return layout.Row{NodeBase: row, Align: layout.AlignCenter, Children: []layout.Node{
 		layout.Icon{NodeBase: icn, Name: icon, Text: text, Style: st},
-		layout.Label{Text: label, Style: layout.TextStyle{Bold: true, Fg: st.Fg, Role: st.Role}},
+		layout.Label{Text: label, Style: layout.TextStyle{Bold: true, Fg: st.Fg, Color: st.Color, Role: st.Role}},
 	}}
 }
 
@@ -357,11 +358,11 @@ func likedTile(s *State, size int, g bool) layout.Node {
 
 // brandMark identifies the app above the sidebar navigation.
 func brandMark(g bool) layout.Node {
-	name := layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Fg: brand}}
+	name := layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Color: layout.ColorAccent}}
 	mark := layout.Row{NodeBase: layout.NodeBase{ID: "brand", PadLeft: 2, Gap: 1}, Align: layout.AlignCenter}
 	if g {
 		mark.H = layout.Points(44)
-		name.Style = layout.TextStyle{Bold: true, Size: 17, Fg: white}
+		name.Style = layout.TextStyle{Bold: true, Size: 17, Color: layout.ColorPrimary}
 		mark.Children = append(mark.Children, layout.Image{NodeBase: layout.NodeBase{W: layout.Points(logoPoints), H: layout.Points(logoPoints)}, Source: logo(), Fit: layout.ImageContain})
 	}
 	mark.Children = append(mark.Children, name)
@@ -399,6 +400,7 @@ const historyColumns = 1 + 2*barLines + 1
 // two keys, the divider under it as their bottom edge (┴), and the rail's
 // divider as the first key's left side (┼ where they meet).
 func terminalTopBar(s *State) layout.Node {
+	pal := s.look().colors()
 	centered := func(n layout.Node) layout.Node {
 		return layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Children: []layout.Node{layout.NewSpacer(), n, layout.NewSpacer()}}
 	}
@@ -410,10 +412,10 @@ func terminalTopBar(s *State) layout.Node {
 	key := func(id string, w layout.Size, junction string, content layout.Node) layout.Node {
 		return layout.Col{NodeBase: layout.NodeBase{ID: id, W: w, H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
 			layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(barLines)}, Children: []layout.Node{
-				keySide{color: searchBorder},
+				keySide{color: pal.border},
 				layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), PadTop: barLines - 2}, Children: []layout.Node{content}},
 			}},
-			newBarFill(layout.Grow(1), junction).withHeight(1),
+			newBarFill(layout.Grow(1), junction, pal.border).withHeight(1),
 		}}
 	}
 	history := func(arrow string, can bool) layout.Node {
@@ -430,20 +432,20 @@ func terminalTopBar(s *State) layout.Node {
 	field.W = layout.Grow(1)
 	icon := layout.Icon{NodeBase: layout.NodeBase{H: layout.Fixed(1)}, Name: layout.IconSearch, Text: "⌕ ", Style: subtle}
 	if focused {
-		icon.Style = layout.TextStyle{Fg: brand}
+		icon.Style = layout.TextStyle{Color: layout.ColorAccent}
 	}
 	search := layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), Gap: 1, PadLeft: 1, PadRight: 1}, Children: []layout.Node{icon, field}}
 	settings := layout.Label{Text: "⚙ Settings", Style: layout.TextStyle{Bold: true}}
 	if s.page == pageSettings {
-		settings.Style.Fg = brand
+		settings.Style.Color = layout.ColorAccent
 	}
 	brandMark := layout.Col{NodeBase: layout.NodeBase{ID: "brand", W: layout.Fixed(termRailWidth), H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
 		layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(barLines), PadLeft: 1, PadTop: barLines - 2, Gap: 1}, Children: []layout.Node{
 			// The logo a line tall, square on screen, beside the name.
 			picture(s, false, layout.Image{NodeBase: layout.NodeBase{W: layout.Fixed(2), H: layout.Fixed(1)}, Source: logo(), Text: "♫", Fit: layout.ImageContain}),
-			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Fg: brand}},
+			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Color: layout.ColorAccent}},
 		}},
-		newBarFill(layout.Grow(1), "").withHeight(1),
+		newBarFill(layout.Grow(1), "", pal.border).withHeight(1),
 	}}
 	return layout.Row{NodeBase: layout.NodeBase{H: layout.Fixed(barLines + 1)}, Children: []layout.Node{
 		brandMark,
@@ -457,6 +459,7 @@ func terminalTopBar(s *State) layout.Node {
 }
 
 func topBar(s *State, g bool) layout.Node {
+	pal := s.look().colors()
 	nav := func(id string, icon layout.IconName, label, tip string, can bool) layout.Node {
 		b := layout.Button{NodeBase: layout.NodeBase{ID: id, Tooltip: tip, W: layout.Points(32), H: layout.Points(32)}, Icon: icon, Label: label, Plain: true, Disabled: !can}
 		if !g {
@@ -481,22 +484,22 @@ func topBar(s *State, g bool) layout.Node {
 		lead = layout.Row{NodeBase: layout.NodeBase{ID: "brand", W: layout.Fixed(rail(g)), PadLeft: 1, Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 			// The logo as tall as the bar (square on screen), beside the name.
 			picture(s, g, layout.Image{NodeBase: layout.NodeBase{W: layout.Fixed(6), H: layout.Fixed(3)}, Source: logo(), Text: "♫", Fit: layout.ImageContain}),
-			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Fg: brand}},
+			layout.Label{Text: "Smolify", Style: layout.TextStyle{Bold: true, Color: layout.ColorAccent}},
 		}}
 		// A framed field, lit while it has the keyboard.
 		icon.W, icon.H = layout.Auto(), layout.Fixed(1)
-		box := layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+		box := layout.Box{Border: layout.BorderRounded, BorderColor: pal.border}
 		if focused {
-			box.BorderColor, icon.Style = brand, layout.TextStyle{Fg: brand}
+			box.BorderColor, icon.Style = pal.accent, layout.TextStyle{Color: layout.ColorAccent}
 		}
 		search = layout.Row{NodeBase: layout.NodeBase{ID: idSearchBox, W: layout.Grow(1), Gap: 1, PadLeft: 1, PadRight: 1, Box: box}, Align: layout.AlignCenter, Children: []layout.Node{icon, field}}
 	}
 	if g {
 		bar.H = layout.Points(48)
 		field.Bare = true
-		box := layout.Box{Background: searchBg, Hover: hoverBg, Round: true}
+		box := layout.Box{Background: pal.search, Hover: pal.hover, Round: true}
 		if focused {
-			box.Background, icon.Style = searchFocusBg, layout.TextStyle{Fg: white}
+			box.Background, icon.Style = pal.searchFocus, layout.TextStyle{Color: layout.ColorPrimary}
 		}
 		search = layout.Row{NodeBase: layout.NodeBase{ID: idSearchBox, W: layout.Fixed(52), H: layout.Points(34), Gap: 1, PadLeft: 1, PadRight: 1, Box: box}, Align: layout.AlignCenter, Children: []layout.Node{icon, field}}
 	}
@@ -508,7 +511,7 @@ func topBar(s *State, g bool) layout.Node {
 		settingsSlot.W = layout.Auto()
 	}
 	if s.page == pageSettings {
-		gear.Style = layout.TextStyle{Fg: brand}
+		gear.Style = layout.TextStyle{Color: layout.ColorAccent}
 	}
 
 	var searchArea layout.Node = search
@@ -527,6 +530,7 @@ func topBar(s *State, g bool) layout.Node {
 
 // centerView shows the page: the selected list, Home, or search.
 func centerView(s *State, g bool, width int) layout.Node {
+	pal := s.look().colors()
 	switch s.page {
 	case pageHome:
 		return homeView(s, g, width)
@@ -587,7 +591,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 		info = append(info, layout.Label{})
 	}
 	info = append(info,
-		layout.Label{NodeBase: layout.NodeBase{ID: "playlist-title", Tooltip: pl.Name}, Text: pl.Name, Truncate: true, Style: layout.TextStyle{Bold: true, Size: 30, Fg: white, Leading: 1.05}},
+		layout.Label{NodeBase: layout.NodeBase{ID: "playlist-title", Tooltip: pl.Name}, Text: pl.Name, Truncate: true, Style: layout.TextStyle{Bold: true, Size: 30, Color: layout.ColorPrimary, Leading: 1.05}},
 	)
 	descriptionStyle := subtle
 	descriptionStyle.Leading = 1.1
@@ -597,14 +601,14 @@ func centerView(s *State, g bool, width int) layout.Node {
 	info = append(info, layout.Label{NodeBase: layout.NodeBase{ID: "playlist-summary"}, Runs: meta, Style: layout.TextStyle{Leading: 1.1}}, layout.NewSpacer())
 	shuffle := subtle
 	if s.shuffle {
-		shuffle = layout.TextStyle{Fg: brand}
+		shuffle = layout.TextStyle{Color: layout.ColorAccent}
 	}
 	playlistPlay := layout.Button{NodeBase: layout.NodeBase{ID: idPlayList, Tooltip: "Play this playlist", W: layout.Points(pick(g, 40, 32)), H: layout.Points(pick(g, 40, 32))}, Icon: layout.IconPlay, Label: "▶", Default: true}
 	if loadingPlaylist(s, pl.URI) {
 		playlistPlay.Icon, playlistPlay.Label, playlistPlay.Disabled = layout.IconNone, loadingIndicator(s), true
 		playlistPlay.Tooltip = "Loading playback…"
 		playlistPlay.Plain = !g
-		playlistPlay.Style = layout.TextStyle{Fg: white, Size: float64(pick(g, 22, 0))}
+		playlistPlay.Style = layout.TextStyle{Color: layout.ColorPrimary, Size: float64(pick(g, 22, 0))}
 	}
 	actions := layout.Row{NodeBase: layout.NodeBase{ID: "playlist-actions", Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 		playlistPlay,
@@ -621,13 +625,13 @@ func centerView(s *State, g bool, width int) layout.Node {
 			if b.W.Kind == layout.SizePoints {
 				b.W = layout.Auto()
 			}
-			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: pal.border}
 			if b.ID == idPlayList {
 				// About square on screen (a cell is twice as tall as
 				// wide), the glyph centered.
 				b.W = layout.Fixed(7)
-				b.Box.BorderColor, b.Default = brand, false
-				b.Plain, b.Style = true, layout.TextStyle{Bold: true, Fg: white}
+				b.Box.BorderColor, b.Default = pal.accent, false
+				b.Plain, b.Style = true, layout.TextStyle{Bold: true, Color: layout.ColorPrimary}
 			}
 			actions.Children[i] = b
 		}
@@ -648,12 +652,12 @@ func centerView(s *State, g bool, width int) layout.Node {
 	if s.username != "" && pl.URI == model.LikedSongs(s.username) {
 		art, wash = likedTile(s, size, g), smolArt()
 	}
-	box := layout.Box{Background: s.tints[pl.Image], Round: true}
+	box := layout.Box{Background: pal.tint(s.tints[pl.Image]), Round: true}
 	if wash != nil {
 		// The cover itself, blurred to a wash and dimmed so white text
 		// reads on it; a tint would flatten it to one color.
 		box.Backdrop = &layout.Backdrop{Source: wash, Blur: 40}
-		box.Background = backdropDim
+		box.Background = pal.dim
 	}
 	if !g {
 		// A terminal draws no blurred wash: the dimming alone would be a
@@ -679,7 +683,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 		note = layout.Row{NodeBase: layout.NodeBase{NoPadding: true, Gap: 1}, Children: []layout.Node{layout.Label{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Text: why, Wrap: true, Style: subtle}, layout.Button{NodeBase: layout.NodeBase{ID: "browse-retry"}, Label: "Retry"}}}
 	case g && s.settings.NotifyErrors: // a window tells these as notifications
 	case s.status != "":
-		note = layout.Label{Text: s.status, Style: layout.TextStyle{Fg: danger}}
+		note = layout.Label{Text: s.status, Style: layout.TextStyle{Color: layout.ColorDanger}}
 	case s.notice != "":
 		note = layout.Label{Text: s.notice, Style: subtle}
 	}
@@ -694,7 +698,7 @@ func centerView(s *State, g bool, width int) layout.Node {
 // virtualView is Home or search: a title, a line or field under it, and
 // the tracks.
 func virtualView(s *State, g bool, width int, title, sub string, field layout.Node) layout.Node {
-	head := []layout.Node{layout.Label{Text: title, Style: layout.TextStyle{Bold: true, Size: 30, Fg: white}}}
+	head := []layout.Node{layout.Label{Text: title, Style: layout.TextStyle{Bold: true, Size: 30, Color: layout.ColorPrimary}}}
 	if sub != "" {
 		head = append(head, layout.Label{Text: sub, Style: subtle})
 	}
@@ -704,7 +708,7 @@ func virtualView(s *State, g bool, width int, title, sub string, field layout.No
 	switch {
 	case g && s.settings.NotifyErrors: // a window tells these as notifications
 	case s.status != "":
-		head = append(head, layout.Label{}, layout.Label{Text: s.status, Wrap: true, Style: layout.TextStyle{Fg: danger}})
+		head = append(head, layout.Label{}, layout.Label{Text: s.status, Wrap: true, Style: layout.TextStyle{Color: layout.ColorDanger}})
 	case s.notice != "":
 		head = append(head, layout.Label{}, layout.Label{Text: s.notice, Wrap: true, Style: subtle})
 	}
@@ -733,6 +737,7 @@ func virtualView(s *State, g bool, width int, title, sub string, field layout.No
 // trackTable is the selected list's tracks: number, title and artists,
 // album, liked, and duration.
 func trackTable(s *State, l model.Listing, listed bool, g bool, width int) layout.Node {
+	pal := s.look().colors()
 	if stage := s.likedLoads[s.shown]; stage != nil {
 		if !listed && stage.total == 0 && stage.offset == 0 && len(stage.tracks) == 0 {
 			if stage.err != "" {
@@ -768,7 +773,7 @@ func trackTable(s *State, l model.Listing, listed bool, g bool, width int) layou
 	header := s.trackCells(g, dateColumn, layout.Label{Text: "#", Style: caption}, layout.Label{}, layout.Label{Text: "Title", Style: caption},
 		layout.Label{Text: "Album", Style: caption}, dateHead, layout.Icon{}, layout.Icon{Name: layout.IconClock, Text: "◷ ", Style: caption})
 	header.H = layout.Size{} // the headings' own height, not a row's
-	rule := layout.Label{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Text: strings.Repeat("─", 400), Style: layout.TextStyle{Fg: lipgloss.Color("#2a2a2a")}}
+	rule := layout.Label{NodeBase: layout.NodeBase{W: layout.Grow(1)}, Text: strings.Repeat("─", 400), Style: layout.TextStyle{Fg: pal.rule}}
 	rows := s.tracks.Rows(idTracks, func(i int, _ bool) layout.Node {
 		if i >= len(l.Tracks) {
 			return layout.Label{}
@@ -776,9 +781,9 @@ func trackTable(s *State, l model.Listing, listed bool, g bool, width int) layou
 		return trackRow(s, numbers[i]-1, l.Tracks[i], g, dateColumn)
 	})
 	rows.ID, rows.W, rows.H = idTracks, layout.Grow(1), layout.Grow(1)
-	withHover(&rows, true, g)
+	withHover(&rows, true, g, pal)
 	if !g && !s.compact {
-		roomyRows(&rows) // a line between songs, easier to read
+		roomyRows(&rows, pal) // a line between songs, easier to read
 	}
 	return layout.Col{NodeBase: layout.NodeBase{H: layout.Grow(1)}, Children: []layout.Node{
 		header,
@@ -821,10 +826,11 @@ func (s *State) trackCells(g, dateColumn bool, num, art, title, album, date, lik
 // trackRow is track t at its original zero-based playlist position i: in two lines with its cover (one when
 // compact); the playing one washed in violet with bars for its number.
 func trackRow(s *State, i int, t model.Track, g, dateColumn bool) layout.Node {
+	pal := s.look().colors()
 	num := layout.Node(layout.Label{Text: strconv.Itoa(i + 1), Style: subtle})
 	requested := pendingTrack(s, t, s.shown)
 	if requested {
-		num = layout.Label{Text: loadingIndicator(s), Style: layout.TextStyle{Fg: brand, Size: float64(pick(g, 18, 0))}}
+		num = layout.Label{Text: loadingIndicator(s), Style: layout.TextStyle{Color: layout.ColorAccent, Size: float64(pick(g, 18, 0))}}
 	}
 	if t.Name == "" {
 		placeholder := "…" // still being listed
@@ -833,21 +839,21 @@ func trackRow(s *State, i int, t model.Track, g, dateColumn bool) layout.Node {
 		}
 		row := s.trackCells(g, dateColumn, num, layout.Label{}, layout.Label{Text: placeholder, Style: subtle}, layout.Label{}, layout.Label{}, layout.Icon{}, layout.Label{})
 		if requested {
-			row.Box = layout.Box{Background: playingBg, Interactive: true, Round: true, InsetY: rowGap}
+			row.Box = layout.Box{Background: pal.playing, Interactive: true, Round: true, InsetY: rowGap}
 		}
 		return row
 	}
 	name := layout.TextStyle{Leading: rowLeading}
 	playing := !loadingPlay(s) && s.track != nil && s.track.URI == t.URI && (s.context == s.shown || virtual(s.shown))
 	if playing {
-		num = layout.Icon{Name: layout.IconEqualizer, Text: "♪ ", Style: layout.TextStyle{Fg: brand}, Animate: s.playing}
+		num = layout.Icon{Name: layout.IconEqualizer, Text: "♪ ", Style: layout.TextStyle{Color: layout.ColorAccent}, Animate: s.playing}
 		if !g { // three bars, flush right with the numbers, moving while it plays
-			num = layout.Label{Text: equalizerBars(s.eqFrame, s.playing), Style: layout.TextStyle{Fg: brand}}
+			num = layout.Label{Text: equalizerBars(s.eqFrame, s.playing), Style: layout.TextStyle{Color: layout.ColorAccent}}
 		}
-		name.Fg = brand
+		name.Color = layout.ColorAccent
 	}
 	if requested {
-		name.Fg = brand
+		name.Color = layout.ColorAccent
 	}
 	artists := strings.Join(t.Artists, ", ")
 	tip := layout.NodeBase{Tooltip: t.Name + " — " + artists}
@@ -855,12 +861,12 @@ func trackRow(s *State, i int, t model.Track, g, dateColumn bool) layout.Node {
 	if s.compact {
 		title = layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), NoPadding: true, Tooltip: tip.Tooltip}, Children: []layout.Node{
 			layout.Label{NodeBase: layout.NodeBase{NoPadding: true}, Text: t.Name + "  ", Truncate: true, Style: name},
-			artistLine(t, i, false),
+			artistLine(t, i, false, pal),
 		}}
 	} else {
 		title = layout.Col{NodeBase: tip, Children: []layout.Node{
 			layout.Label{NodeBase: layout.NodeBase{NoPadding: true}, Text: t.Name, Truncate: true, Style: name},
-			artistLine(t, i, true),
+			artistLine(t, i, true, pal),
 		}}
 	}
 	albumBase := layout.NodeBase{Tooltip: t.Album, NoPadding: true}
@@ -871,7 +877,7 @@ func trackRow(s *State, i int, t model.Track, g, dateColumn bool) layout.Node {
 	}
 	album := layout.Label{NodeBase: albumBase, Text: t.Album, Truncate: true, Style: subtle}
 	if albumBase.ID != "" {
-		album.HoverFg = brand
+		album.HoverFg = pal.accent
 	}
 	date := layout.Node(layout.Label{})
 	if dateColumn {
@@ -879,14 +885,14 @@ func trackRow(s *State, i int, t model.Track, g, dateColumn bool) layout.Node {
 	}
 	row := s.trackCells(g, dateColumn, num, thumb(s, t.Cover, 32, g), title, album, date, rowHeart(s.liked[t.URI], t.URI), layout.Label{Text: clock(t.Duration), Style: subtle})
 	if playing || requested {
-		row.Box = layout.Box{Background: playingBg, Interactive: true, Round: true, InsetY: rowGap}
+		row.Box = layout.Box{Background: pal.playing, Interactive: true, Round: true, InsetY: rowGap}
 	}
 	return row
 }
 
 // artistLine keeps each visible artist independently targetable while using
 // the same comma-separated text, truncation, and subdued style as the row.
-func artistLine(t model.Track, row int, fill bool) layout.Node {
+func artistLine(t model.Track, row int, fill bool, pal colors) layout.Node {
 	style := secondary
 	style.Leading = rowLeading
 	base := layout.NodeBase{NoPadding: true}
@@ -907,7 +913,7 @@ func artistLine(t model.Track, row int, fill bool) layout.Node {
 		}
 		label := layout.Label{NodeBase: nb, Text: text, Truncate: true, Style: style}
 		if nb.ID != "" {
-			label.HoverFg = brand
+			label.HoverFg = pal.accent
 		}
 		children = append(children, label)
 	}
@@ -929,7 +935,7 @@ func rowHeart(liked bool, uri string) layout.Node {
 	icon := layout.Icon{Name: layout.IconHeartOutline, Text: "♡ ", Style: subtle}
 	tip := "Save to Liked Songs"
 	if liked {
-		icon = layout.Icon{Name: layout.IconHeart, Text: "♥ ", Style: layout.TextStyle{Fg: brand}}
+		icon = layout.Icon{Name: layout.IconHeart, Text: "♥ ", Style: layout.TextStyle{Color: layout.ColorAccent}}
 		tip = "Remove from Liked Songs"
 	}
 	if !strings.HasPrefix(uri, "spotify:track:") {
@@ -941,14 +947,14 @@ func rowHeart(liked bool, uri string) layout.Node {
 func heart(liked bool, id string) layout.Node {
 	if id == "" {
 		if liked {
-			return layout.Icon{Name: layout.IconHeart, Text: "♥ ", Style: layout.TextStyle{Fg: brand}}
+			return layout.Icon{Name: layout.IconHeart, Text: "♥ ", Style: layout.TextStyle{Color: layout.ColorAccent}}
 		}
 		return layout.Icon{Text: "  "}
 	}
 	b := layout.Button{NodeBase: layout.NodeBase{ID: id, Tooltip: "Save to Liked Songs (l)", W: layout.Points(24), H: layout.Points(24)},
 		Icon: layout.IconHeartOutline, Label: "♡", Plain: true, Style: subtle}
 	if liked {
-		b.Tooltip, b.Icon, b.Label, b.Style = "Remove from Liked Songs (l)", layout.IconHeart, "♥", layout.TextStyle{Fg: brand}
+		b.Tooltip, b.Icon, b.Label, b.Style = "Remove from Liked Songs (l)", layout.IconHeart, "♥", layout.TextStyle{Color: layout.ColorAccent}
 	}
 	return b
 }
@@ -986,8 +992,9 @@ func picture(s *State, g bool, im layout.Image) layout.Image {
 // shows an image's text) and until it loads, a ♫ on a tile; with no url
 // (a playlist without a cover), the ♫ on Smolify's own art.
 func cover(s *State, url string, size int, g bool) layout.Node {
+	pal := s.look().colors()
 	// A blank picture behind the tile rounds it as the covers it stands for.
-	nb := layout.NodeBase{W: layout.Points(size), H: layout.Points(size), Box: layout.Box{Background: tileBg, Round: true, Backdrop: &layout.Backdrop{Source: blankArt}}}
+	nb := layout.NodeBase{W: layout.Points(size), H: layout.Points(size), Box: layout.Box{Background: pal.tile, Round: true, Backdrop: &layout.Backdrop{Source: blankArt(pal.tile)}}}
 	if im := s.covers[url]; im != nil {
 		return picture(s, g, layout.Image{NodeBase: layout.NodeBase{W: nb.W, H: nb.H, Box: layout.Box{Round: true}}, Source: im, Text: coverText(size), Fit: layout.ImageCover})
 	}
@@ -1047,6 +1054,7 @@ func plural(n int, what string) string {
 // playerBar is the now-playing bar: the track, the transport, the progress,
 // and the volume.
 func playerBar(s *State, g bool, width int) layout.Node {
+	pal := s.look().colors()
 	title, artists := "Nothing playing", "Pick a playlist and press space"
 	coverURL := ""
 	if t := s.track; t != nil {
@@ -1079,7 +1087,7 @@ func playerBar(s *State, g bool, width int) layout.Node {
 	}
 	mode := func(on bool) layout.TextStyle {
 		if on {
-			return layout.TextStyle{Fg: brand}
+			return layout.TextStyle{Color: layout.ColorAccent}
 		}
 		return subtle
 	}
@@ -1091,7 +1099,7 @@ func playerBar(s *State, g bool, width int) layout.Node {
 		play.Icon, play.Label, play.Disabled = layout.IconNone, loadingIndicator(s), true
 		play.Tooltip = "Loading playback…"
 		play.Plain = !g
-		play.Style = layout.TextStyle{Fg: white, Size: float64(pick(g, 22, 0))}
+		play.Style = layout.TextStyle{Color: layout.ColorPrimary, Size: float64(pick(g, 22, 0))}
 	}
 	skip := subtle // a terminal's glyphs are small enough: full brightness
 	if !g {
@@ -1120,10 +1128,10 @@ func playerBar(s *State, g bool, width int) layout.Node {
 			// Square on screen (a cell is twice as tall as it is wide), with
 			// room inside for the icon's picture.
 			b.W, b.H = layout.Fixed(8), layout.Fixed(4)
-			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}
+			b.Box = layout.Box{Border: layout.BorderRounded, BorderColor: pal.border}
 			if b.ID == idPlay {
-				b.Box.BorderColor, b.Default = brand, false
-				b.Plain, b.Style = true, layout.TextStyle{Bold: true, Fg: white}
+				b.Box.BorderColor, b.Default = pal.accent, false
+				b.Plain, b.Style = true, layout.TextStyle{Bold: true, Color: layout.ColorPrimary}
 			}
 			controls.Children[i] = b
 		}
@@ -1140,7 +1148,7 @@ func playerBar(s *State, g bool, width int) layout.Node {
 	}
 	timeline := layout.Row{NodeBase: layout.NodeBase{ID: "player-timeline", Gap: 1}, Align: layout.AlignCenter, Children: []layout.Node{
 		layout.Label{Text: clock(pos), Style: subtle},
-		layout.Slider{NodeBase: layout.NodeBase{ID: idProgress}, Value: progress, Fill: brand, Disabled: s.track == nil},
+		layout.Slider{NodeBase: layout.NodeBase{ID: idProgress}, Value: progress, Fill: pal.accent, Disabled: s.track == nil},
 		layout.Label{Text: clock(dur), Style: subtle},
 	}}
 
@@ -1153,7 +1161,7 @@ func playerBar(s *State, g bool, width int) layout.Node {
 	}
 	// In a window the volume is as wide as the track beside the rail, so
 	// the controls sit in the window's middle.
-	slider := layout.Slider{NodeBase: layout.NodeBase{ID: idVolume, Tooltip: "Volume (+/-)"}, Value: vol, Fill: brand}
+	slider := layout.Slider{NodeBase: layout.NodeBase{ID: idVolume, Tooltip: "Volume (+/-)"}, Value: vol, Fill: pal.accent}
 	source, sourceLabel := playbackSource(s)
 	sourceTip := "Return to the current " + strings.ToLower(sourceLabel)
 	if source.Name != "" {
@@ -1244,7 +1252,7 @@ func loadingView(s *State, g bool) layout.Node {
 	}
 	stack := layout.Col{NodeBase: layout.NodeBase{ID: "loading-stack", W: layout.Grow(1), NoPadding: true, Gap: 2}, Align: layout.AlignCenter, Children: []layout.Node{
 		mark,
-		layout.Label{NodeBase: layout.NodeBase{ID: "loading-name"}, Text: "Smolify", Style: layout.TextStyle{Bold: true, Size: 28, Fg: white}},
+		layout.Label{NodeBase: layout.NodeBase{ID: "loading-name"}, Text: "Smolify", Style: layout.TextStyle{Bold: true, Size: 28, Color: layout.ColorPrimary}},
 		layout.Label{NodeBase: layout.NodeBase{ID: "loading-message"}, Text: statusOr(s, "Loading…"), Style: subtle},
 	}}
 	return layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Grow(1), NoPadding: true}, Children: []layout.Node{layout.NewSpacer(), stack, layout.NewSpacer()}}
