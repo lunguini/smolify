@@ -175,10 +175,11 @@ func sortView(s *State) layout.Node {
 // framedSort is the sort control in a terminal: a rounded frame as the
 // search field has, lit while it has the keyboard or is open.
 func framedSort(s *State) layout.Node {
+	pal := s.look().colors()
 	b := layout.Button{NodeBase: layout.NodeBase{ID: idSort, Tooltip: "Sort songs", H: layout.Fixed(3), PadLeft: 1, PadRight: 1,
-		Box: layout.Box{Border: layout.BorderRounded, BorderColor: searchBorder}}, Plain: true, Label: "⇅ " + s.trackSort.Value() + " ▾"}
+		Box: layout.Box{Border: layout.BorderRounded, BorderColor: pal.border}}, Plain: true, Label: "⇅ " + s.trackSort.Value() + " ▾"}
 	if s.focus == paneSort || s.trackSort.IsOpen() {
-		b.Box.BorderColor = brand
+		b.Box.BorderColor = pal.accent
 	}
 	return s.trackSort.LayoutWithButton(b)
 }

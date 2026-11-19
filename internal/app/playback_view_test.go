@@ -19,7 +19,7 @@ func TestPendingPlayHighlightsRequestedRowAndReplacesPlayGlyph(t *testing.T) {
 	command(s, cmdPlayTrack, s.fx)
 	requested := trackRow(s, 1, bassHouse.Tracks[1], true, false).(layout.Row)
 	old := trackRow(s, 0, bassHouse.Tracks[0], true, false).(layout.Row)
-	if requested.Box.Background != playingBg || old.Box.Background != nil {
+	if requested.Box.Background != s.look().colors().playing || old.Box.Background != nil {
 		t.Fatal("requested row not the loading highlight")
 	}
 	scene := layout.LayoutScene(playerBar(s, true, 0), 1100, 120, layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32})

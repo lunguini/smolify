@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -534,7 +535,12 @@ func TestWindowSettingsHaveNoImagesRow(t *testing.T) {
 			t.Fatal("a window lists the terminal images setting")
 		}
 	}
-	if len(settingRows(&State{})) != len(settingIDs) {
-		t.Fatal("a terminal hides a setting")
+	// A terminal lists every setting but the theme (it needs a second look
+	// to choose) and the theme browser (it needs a Marketplace).
+	if got := settingRows(&State{}); len(got) != len(settingIDs)-2 || slices.Contains(got, setTheme) || slices.Contains(got, setBrowseThemes) {
+		t.Fatalf("terminal rows %q", got)
+	}
+	if got := settingRows(&State{looks: []Look{SmolifyLook(), {ID: "A/B"}}, market: marketState{source: &fakeThemes{}}}); len(got) != len(settingIDs) {
+		t.Fatalf("terminal rows with two looks %q", got)
 	}
 }

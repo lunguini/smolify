@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"strings"
 
@@ -157,8 +158,9 @@ func homeCardID(index int) string { return "home-card:" + strconv.Itoa(index) }
 // homeView draws bounded shelves inside the center pane. IDs identify card
 // occurrences, since Spotify can recommend the same album in several shelves.
 func homeView(s *State, g bool, width int) layout.Node {
-	perRow, _, gap, pad, coverSize := homeGridGeometry(s, g, width)
-	body := []layout.Node{layout.Label{Text: "Home", Style: layout.TextStyle{Bold: true, Size: float64(pick(g, 30, 0)), Fg: white}}}
+	pal := s.look().colors()
+	perRow, cardWidth, gap, pad, coverSize := homeGridGeometry(s, g, width)
+	body := []layout.Node{layout.Label{Text: "Home", Style: layout.TextStyle{Bold: true, Size: float64(pick(g, 30, 0)), Color: layout.ColorPrimary}}}
 	if s.discovery.Home.Greeting != "" {
 		body = append(body, layout.Label{Text: s.discovery.Home.Greeting, Style: subtle})
 	}
@@ -191,14 +193,27 @@ func homeView(s *State, g bool, width int) layout.Node {
 				nb := layout.NodeBase{ID: homeCardID(index), W: layout.Grow(1), Pad: pad, Tooltip: item.Name,
 					Box: layout.Box{Interactive: true, Round: true, Selected: s.focus == paneTracks && index == s.discovery.HomeCursor}}
 				if nb.Box.Selected {
-					nb.Box.Background = playingBg
+					nb.Box.Background = pal.playing
 				}
-				cards = append(cards, card(nb, homeArtwork(s, item.Image, coverSize, g),
-					layout.Label{Text: item.Name, Truncate: true, Style: strong}, layout.Label{Text: detail, Truncate: true, Style: secondary}))
+				name := layout.Label{Text: item.Name, Truncate: true, Style: strong}
+				kind := layout.Label{Text: detail, Truncate: true, Style: secondary}
+				if g {
+					// The cover fills the card, flush to its top and sides; the
+					// name and kind sit in a strip below it.
+					nb.W, nb.NoPadding = layout.Points(cardWidth), true
+					cards = append(cards, card(nb, homeArtwork(s, item.Image, coverSize, g),
+						layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), NoPadding: true, PadLeft: 2, PadRight: 2, PadTop: 1, PadBottom: 2}, Children: []layout.Node{name, kind}}))
+				} else {
+					cards = append(cards, card(nb, homeArtwork(s, item.Image, coverSize, g), name, kind))
+				}
 				index++
 			}
 			for len(cards) < perRow {
-				cards = append(cards, layout.Col{NodeBase: layout.NodeBase{W: layout.Grow(1), NoPadding: true}})
+				filler := layout.NodeBase{W: layout.Grow(1), NoPadding: true}
+				if g {
+					filler.W = layout.Points(cardWidth)
+				}
+				cards = append(cards, layout.Col{NodeBase: filler})
 			}
 			body = append(body, layout.Row{NodeBase: layout.NodeBase{W: layout.Grow(1), NoPadding: true, Gap: gap}, Children: cards})
 		}
@@ -220,15 +235,18 @@ func homeGridGeometry(s *State, graphical bool, frameWidth int) (columns, cardWi
 		if width <= 0 {
 			width = float64(max(12, frameWidth-railWidth-8) * layout.PointsPerColumn)
 		}
-		gap, pad = 3, 3 // 12pt gutters and insets at the default 4pt step.
-		const minCard, maxCard = 150, 210
-		cols := max(1, int((width+12)/float64(minCard+12)))
-		for cols > 1 && (width-float64((cols-1)*12))/float64(cols) < minCard {
+		// 12pt gutters (3 steps at the default 4pt), and as many columns as
+		// keep a card at most maxCard wide; the cards then share the width
+		// exactly, and a cover is its card's full width.
+		gap, pad = 3, 0
+		const minCard, maxCard, gutter = 150, 210, 12
+		share := func(cols int) float64 { return (width - float64((cols-1)*gutter)) / float64(cols) }
+		cols := max(1, int(math.Ceil((width+gutter)/(maxCard+gutter))))
+		for cols > 1 && share(cols) < minCard {
 			cols--
 		}
-		cw := min(maxCard, int((width-float64((cols-1)*12))/float64(cols)))
-		const defaultStepPoints = 4
-		return cols, cw, gap, pad, max(1, cw-2*pad*defaultStepPoints)
+		cw := max(1, int(share(cols)))
+		return cols, cw, gap, pad, cw
 	}
 	width := s.discovery.HomeRects[idHomeContent].W
 	if width <= 0 {

@@ -1,6 +1,9 @@
 package app
 
 import (
+	"fmt"
+	"image/color"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +12,7 @@ import (
 	"github.com/lunguini/flatte"
 	"github.com/lunguini/flatte/flatest"
 	"github.com/lunguini/flatte/flatui/layout"
+	"github.com/lunguini/flatte/theme"
 
 	"github.com/lunguini/smolify/internal/model"
 	"github.com/lunguini/smolify/internal/player"
@@ -146,7 +150,8 @@ func TestEqualizerMovesWhilePlayingAndRests(t *testing.T) {
 func TestPlayingRowIsDimlyOutlinedNotWashed(t *testing.T) {
 	s := sampleApp().State
 	fr, _ := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 160}), 160, 40)
-	if !strings.Contains(fr.Content, "38;2;79;68;117m╭") {
+	edge := s.look().colors().playingEdge
+	if !strings.Contains(fr.Content, fmt.Sprintf("38;2;%d;%d;%dm╭", edge.R, edge.G, edge.B)) {
 		t.Fatal("no dim outline on the playing row")
 	}
 	if !strings.Contains(plain(fr), equalizerBars(0, s.playing)) {
@@ -234,5 +239,45 @@ func TestLikedArtHeartIsCentered(t *testing.T) {
 	above, below := top-b.Min.Y, b.Max.Y-1-bottom
 	if d := above - below; d < -2 || d > 2 {
 		t.Fatalf("heart from line %d to %d: %d above, %d below", top, bottom, above, below)
+	}
+}
+
+// With a theme's cell palette in effect (as at run time), the selected
+// entry is marked by its accent outline alone: no fill under it or its
+// sides.
+func TestTerminalSelectionIsOutlinedNotFilled(t *testing.T) {
+	s := sampleApp().State
+	layout.UseCellTheme(&s.look().Design.Dark)
+	defer layout.UseCellTheme(nil)
+	fr, _ := flatte.ComposeFrame(View(s, flatte.RenderContext{Width: 120}), 120, 34)
+	lines, plainLines := strings.Split(fr.Content, "\n"), strings.Split(plain(fr), "\n")
+	row := -1
+	for i, l := range plainLines {
+		if strings.Contains(l, "Low Tide") {
+			row = i
+		}
+	}
+	if row < 1 {
+		t.Fatalf("no selected row:\n%s", plain(fr))
+	}
+	c := s.look().colors()
+	accent := fmt.Sprintf("38;2;%d;%d;%dm│", c.accent.R, c.accent.G, c.accent.B)
+	if !strings.Contains(lines[row], accent) {
+		t.Errorf("selected row not outlined in the accent: %q", lines[row])
+	}
+	for _, fill := range []color.NRGBA{c.termSelect, theme.Over(s.look().Design.Dark.SelectionActive, theme.Over(s.look().Design.Dark.Content, s.look().Design.Dark.Canvas))} {
+		bg := fmt.Sprintf("48;2;%d;%d;%dm", fill.R, fill.G, fill.B)
+		for _, l := range lines[row-1 : row+3] {
+			if strings.Contains(l, bg) {
+				t.Errorf("selected entry filled (%s): %q", bg, l)
+			}
+		}
+	}
+	// No outline side sits on any background.
+	onFill := regexp.MustCompile(`48;2;\d+;\d+;\d+m│`)
+	for _, l := range lines[row : row+2] {
+		if onFill.MatchString(l) {
+			t.Errorf("a side drawn on a fill: %q", l)
+		}
 	}
 }

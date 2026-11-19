@@ -18,11 +18,12 @@ import (
 // of tees (┬, ┴, …), counted from its left.
 type hrule struct {
 	layout.NodeBase
-	tees map[int]string
+	tees  map[int]string
+	color color.Color
 }
 
-func newHRule(tees map[int]string) hrule {
-	return hrule{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(1)}, tees: tees}
+func newHRule(tees map[int]string, c color.Color) hrule {
+	return hrule{NodeBase: layout.NodeBase{W: layout.Grow(1), H: layout.Fixed(1)}, tees: tees, color: c}
 }
 
 func (h hrule) Size() (layout.Size, layout.Size) { return h.W, h.H }
@@ -36,18 +37,19 @@ func (h hrule) Render(r layout.Rect) string {
 			b.WriteString("─")
 		}
 	}
-	return lipgloss.NewStyle().Foreground(searchBorder).Render(b.String())
+	return lipgloss.NewStyle().Foreground(h.color).Render(b.String())
 }
 
 // vrule is a vertical line down its height, with a tee at each line of
 // tees (├, ┤, …), counted from its top.
 type vrule struct {
 	layout.NodeBase
-	tees map[int]string
+	tees  map[int]string
+	color color.Color
 }
 
-func newVRule(tees map[int]string) vrule {
-	return vrule{NodeBase: layout.NodeBase{W: layout.Fixed(1), H: layout.Grow(1)}, tees: tees}
+func newVRule(tees map[int]string, c color.Color) vrule {
+	return vrule{NodeBase: layout.NodeBase{W: layout.Fixed(1), H: layout.Grow(1)}, tees: tees, color: c}
 }
 
 func (v vrule) Size() (layout.Size, layout.Size) { return v.W, v.H }
@@ -60,7 +62,7 @@ func (v vrule) Render(r layout.Rect) string {
 			lines[y] = tee
 		}
 	}
-	return lipgloss.NewStyle().Foreground(searchBorder).Render(strings.Join(lines, "\n"))
+	return lipgloss.NewStyle().Foreground(v.color).Render(strings.Join(lines, "\n"))
 }
 
 // The selected entry of a list in a terminal is outlined, rounded as the
@@ -79,11 +81,12 @@ const (
 	outlineSelected
 )
 
-func (o outline) color() color.Color {
+// color is o's color in pal.
+func (o outline) color(pal colors) color.Color {
 	if o == outlinePlaying {
-		return playingEdge
+		return pal.playingEdge
 	}
-	return brand
+	return pal.accent
 }
 
 // outlineEdge is a line of room between two list rows: the top edge
@@ -93,6 +96,7 @@ type outlineEdge struct {
 	layout.NodeBase
 	below bool // the edge under the entry above
 	kind  outline
+	color color.Color
 }
 
 func (e outlineEdge) Size() (layout.Size, layout.Size) { return layout.Grow(1), layout.Fixed(1) }
@@ -105,24 +109,24 @@ func (e outlineEdge) Render(r layout.Rect) string {
 	if e.below {
 		left, right = "╰", "╯"
 	}
-	return lipgloss.NewStyle().Foreground(e.kind.color()).Render(left + strings.Repeat("─", r.W-2) + right)
+	return lipgloss.NewStyle().Foreground(e.color).Render(left + strings.Repeat("─", r.W-2) + right)
 }
 
 // outlineSide is a side of an entry's outline, down its height.
 type outlineSide struct {
 	layout.NodeBase
-	kind outline
+	color color.Color
 }
 
 func (outlineSide) Size() (layout.Size, layout.Size) { return layout.Fixed(1), layout.Grow(1) }
 
 func (o outlineSide) Render(r layout.Rect) string {
-	return lipgloss.NewStyle().Foreground(o.kind.color()).Render(strings.TrimSuffix(strings.Repeat("│\n", max(r.H, 0)), "\n"))
+	return lipgloss.NewStyle().Foreground(o.color).Render(strings.TrimSuffix(strings.Repeat("│\n", max(r.H, 0)), "\n"))
 }
 
 // roomyRows puts a line of room before each of rows' entries in a
-// terminal, and outlines the selected entry (see outlineEdge).
-func roomyRows(rows *layout.Col) {
+// terminal, and outlines the selected entry (see outlineEdge), in pal.
+func roomyRows(rows *layout.Col, pal colors) {
 	if len(rows.Children) == 0 {
 		return
 	}
@@ -131,11 +135,11 @@ func roomyRows(rows *layout.Col) {
 		if !ok {
 			return outlineNone
 		}
-		if r.Box.Selected && r.Box.Background == termSelectBg {
+		if r.Box.Selected && r.Box.Background == pal.termSelect {
 			return outlineSelected
 		}
 		for _, child := range r.Children {
-			if inner, ok := child.(layout.Row); ok && inner.Box.Background == playingBg {
+			if inner, ok := child.(layout.Row); ok && inner.Box.Background == pal.playing {
 				return outlinePlaying
 			}
 		}
@@ -149,11 +153,12 @@ func roomyRows(rows *layout.Col) {
 		}
 		marked[i] = kind
 		// The outline marks it instead of a fill; its sides take a column of
-		// the entry's padding each, so its content stays put.
+		// the entry's padding each, so its content stays put. Its box is not
+		// Selected either, or a theme's cell palette would fill it.
 		r := c.(layout.Row)
-		r.Box.Background = nil
+		r.Box.Background, r.Box.Selected = nil, false
 		inner := make([]layout.Node, 0, len(r.Children)+2)
-		inner = append(inner, outlineSide{kind: kind})
+		inner = append(inner, outlineSide{color: kind.color(pal)})
 		for _, child := range r.Children {
 			if row, ok := child.(layout.Row); ok {
 				row.Box.Background = nil
@@ -162,7 +167,7 @@ func roomyRows(rows *layout.Col) {
 			}
 			inner = append(inner, child)
 		}
-		r.Children = append(inner, outlineSide{kind: kind})
+		r.Children = append(inner, outlineSide{color: kind.color(pal)})
 		rows.Children[i] = r
 	}
 	// A line of room before the first entry too, for its top edge.
@@ -173,9 +178,9 @@ func roomyRows(rows *layout.Col) {
 			above = marked[i-1]
 		}
 		// The brighter of the two outlines meeting here draws its edge.
-		edge := outlineEdge{kind: marked[i]}
+		edge := outlineEdge{kind: marked[i], color: marked[i].color(pal)}
 		if above > marked[i] {
-			edge = outlineEdge{kind: above, below: true}
+			edge = outlineEdge{kind: above, below: true, color: above.color(pal)}
 		}
 		out = append(out, edge, c)
 	}
@@ -212,11 +217,12 @@ func equalizerBars(f int, playing bool) string {
 // above, its share of the divider on its last line (from tee on, when set).
 type barFill struct {
 	layout.NodeBase
-	tee string
+	tee   string
+	color color.Color
 }
 
-func newBarFill(w layout.Size, tee string) barFill {
-	return barFill{NodeBase: layout.NodeBase{W: w, H: layout.Fixed(3)}, tee: tee}
+func newBarFill(w layout.Size, tee string, c color.Color) barFill {
+	return barFill{NodeBase: layout.NodeBase{W: w, H: layout.Fixed(3)}, tee: tee, color: c}
 }
 
 func (f barFill) Size() (layout.Size, layout.Size) { return f.W, f.H }
@@ -233,7 +239,7 @@ func (f barFill) Render(r layout.Rect) string {
 	for i := range lines[:r.H-1] {
 		lines[i] = strings.Repeat(" ", r.W)
 	}
-	lines[r.H-1] = lipgloss.NewStyle().Foreground(searchBorder).Render(line)
+	lines[r.H-1] = lipgloss.NewStyle().Foreground(f.color).Render(line)
 	return strings.Join(lines, "\n")
 }
 

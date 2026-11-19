@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,6 +25,7 @@ import (
 	"github.com/lunguini/smolify/internal/demo"
 	"github.com/lunguini/smolify/internal/librarycache"
 	"github.com/lunguini/smolify/internal/player"
+	"github.com/lunguini/smolify/internal/spicetify"
 	"github.com/lunguini/smolify/internal/spotify"
 )
 
@@ -63,7 +65,7 @@ func main() {
 	if *demoMode {
 		backend := demo.New()
 		go backend.Run(ctx)
-		a := app.New(backend, backend, backend, nil)
+		a := app.WithMarketplace(app.WithLooks(app.New(backend, backend, backend, nil), spicetifyLooks()), marketplace(), nil, nil)
 		if gui {
 			a = app.Windowed(a)
 		}
@@ -97,7 +99,14 @@ func main() {
 		defer writeHeapProfile(*heapProfile)
 	}
 	web := &spotify.Client{Token: p.Token, ClientToken: p.ClientToken}
-	a := app.WithCache(app.WithSettings(app.New(p, app.HTTPImages{}, web, debug), settingsPath, settings), cacheDir)
+	themesPath := app.ThemesPath(dir)
+	saved, err := app.LoadThemes(themesPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "smolify: themes:", err)
+	}
+	a := app.New(p, app.HTTPImages{}, web, debug)
+	a = app.WithMarketplace(app.WithLooks(a, spicetifyLooks()), marketplace(), &app.FileThemes{Path: themesPath}, saved)
+	a = app.WithCache(app.WithSettings(a, settingsPath, settings), cacheDir)
 	if gui {
 		a = app.Windowed(a)
 	}
@@ -109,8 +118,15 @@ func main() {
 
 // runOptions returns the run options shared by the signed-in and demo modes.
 func runOptions(gui bool) []flatte.Option {
+	// A window reports the pointer resting over things too (the theme
+	// browser takes a theme the pointer rests on); a terminal, clicks
+	// and drags.
+	mouse := flatte.MouseModeCellMotion
+	if gui {
+		mouse = flatte.MouseModeAllMotion
+	}
 	options := []flatte.Option{
-		flatte.WithMouse(flatte.MouseModeCellMotion),
+		flatte.WithMouse(mouse),
 		flatte.WithoutDefaultQuit(),
 		flatte.WithReportFocus(),
 	}
@@ -119,6 +135,33 @@ func runOptions(gui bool) []flatte.Option {
 		return append(options, window.Options{Title: "Smolify", Theme: &theme, Fonts: app.WindowFonts(), HideTitleBar: true, Translucent: true, Width: 110, Height: 34, MinWidth: 70, MinHeight: 20, Autosave: "smolify.main"})
 	}
 	return append(options, media.Controls{})
+}
+
+// marketplace is the Spicetify Marketplace's theme index on GitHub.
+func marketplace() spicetify.Marketplace {
+	return spicetify.Marketplace{Client: &http.Client{Timeout: 20 * time.Second}}
+}
+
+// spicetifyLooks are the color schemes of the themes installed for
+// Spicetify, from the first of its config directories that exists.
+func spicetifyLooks() []app.Look {
+	home, _ := os.UserHomeDir()
+	for _, dir := range spicetify.ConfigDirs(runtime.GOOS, os.Getenv, home) {
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			continue
+		}
+		installed, err := spicetify.Load(os.DirFS(dir))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "smolify: spicetify themes:", err)
+			return nil
+		}
+		looks := make([]app.Look, len(installed.Schemes))
+		for i, sc := range installed.Schemes {
+			looks[i] = app.SpicetifyLook(sc)
+		}
+		return looks
+	}
+	return nil
 }
 
 // logMemory writes the Go runtime's memory figures to w every 10 seconds:

@@ -84,14 +84,27 @@ func TestHomeReturnsReuseSessionData(t *testing.T) {
 func TestHomeGridUsesMeasuredPaneWidth(t *testing.T) {
 	s := New(nil, nil, nil, nil).State
 	s.discovery.HomeWidthPoints = 420
-	narrow, card, _, pad, art := homeGridGeometry(s, true, 110)
-	if narrow != 2 || art != card-2*pad*4 {
-		t.Fatalf("Narrow grid: %d columns, %d card, %d art", narrow, card, art)
+	// A cover fills its card's width, and the cards and their 12pt
+	// gutters fill the pane: no frame around a cover, no slack beside a card.
+	for _, width := range []float64{420, 1000, 1337} {
+		s.discovery.HomeWidthPoints = width
+		cols, card, _, _, art := homeGridGeometry(s, true, 110)
+		if art != card {
+			t.Errorf("%vpt: cover %d in a %dpt card", width, art, card)
+		}
+		if card < 150 || card > 210 {
+			t.Errorf("%vpt: card %dpt", width, card)
+		}
+		if used := cols*card + (cols-1)*12; float64(used) > width || width-float64(used) >= float64(cols) {
+			t.Errorf("%vpt: %d cards of %dpt use %dpt", width, cols, card, used)
+		}
 	}
+	s.discovery.HomeWidthPoints = 420
+	narrow, _, _, _, _ := homeGridGeometry(s, true, 110)
 	s.discovery.HomeWidthPoints = 1000
 	wide, _, _, _, _ := homeGridGeometry(s, true, 110)
-	if wide <= 4 || wide <= narrow {
-		t.Fatalf("Wide pane did not expand grid: narrow=%d wide=%d", narrow, wide)
+	if narrow != 2 || wide <= 4 {
+		t.Fatalf("columns: narrow=%d wide=%d", narrow, wide)
 	}
 }
 
@@ -133,4 +146,30 @@ func TestWindowHomeStartupPreview(t *testing.T) {
 	s.discovery.Home = spotify.HomeFeed{Sections: []spotify.HomeSection{{Title: "Made for you", Items: items}}}
 	write("smolify-home-wide.png", 140, 34)
 	write("smolify-home-narrow.png", 90, 34)
+}
+
+// In a window a Home card is its cover, full width and flush to the top,
+// over a short strip for the name and kind; the cards fill the row.
+func TestWindowHomeCardsAreTheirCovers(t *testing.T) {
+	s := sampleApp().State
+	s.discovery.Home = spotify.HomeFeed{Sections: []spotify.HomeSection{{Title: "Made for you", Items: []spotify.HomeItem{
+		{URI: "a", Name: "Daily Mix 1", Kind: "Playlist", Image: "c:1"}, {URI: "b", Name: "Discover", Kind: "Playlist", Image: "c:2"},
+		{URI: "c", Name: "Shores", Kind: "Album", Image: "c:t"}, {URI: "d", Name: "Radar", Kind: "Playlist"}}}}}
+	s.page = pageHome
+	m := layout.Metrics{Column: 8, Line: 20, Step: 4, Border: 1, DefaultPadding: true, ControlHeight: 32}
+	scene := layout.LayoutScene(View(s, flatte.RenderContext{Graphical: true, Width: 137}).Root, 1100, 800, m)
+	s.discovery.HomeWidthPoints = scene.Rects[idHomeContent].W // as the LayoutEvent reports it
+	scene = layout.LayoutScene(View(s, flatte.RenderContext{Graphical: true, Width: 137}).Root, 1100, 800, m)
+	content := scene.Rects[idHomeContent]
+	cols, card, _, _, art := homeGridGeometry(s, true, 137)
+	first, last := scene.Rects[homeCardID(0)], scene.Rects[homeCardID(cols-1)]
+	if first.X != content.X || last.X+last.W != content.X+float64(cols*card+(cols-1)*12) || content.X+content.W-(last.X+last.W) >= float64(cols) {
+		t.Errorf("cards %v … %v in content %v", first, last, content)
+	}
+	if art != card || first.W != float64(card) {
+		t.Errorf("cover %d in a %v card", art, first)
+	}
+	if strip := first.H - float64(art); strip < 30 || strip > 52 {
+		t.Errorf("name strip %vpt", strip)
+	}
 }

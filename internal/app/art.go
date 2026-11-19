@@ -47,13 +47,20 @@ var smolArt = sync.OnceValue(func() image.Image {
 	return out
 })
 
-// blankArt is a cover still loading: one pixel of the tile color.
-var blankArt = func() image.Image {
+// blankArt is a cover still loading: one pixel of the look's tile color,
+// the same image for the same color so hosts keep their copy of it.
+func blankArt(tile color.NRGBA) image.Image {
+	tile.A = 0xff
+	if im, ok := blankArts.Load(tile); ok {
+		return im.(image.Image)
+	}
 	im := image.NewRGBA(image.Rect(0, 0, 1, 1))
-	r, g, b, _ := tileBg.RGBA()
-	im.SetRGBA(0, 0, color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), 0xff})
-	return im
-}()
+	im.SetRGBA(0, 0, color.RGBA{tile.R, tile.G, tile.B, 0xff})
+	got, _ := blankArts.LoadOrStore(tile, image.Image(im))
+	return got.(image.Image)
+}
+
+var blankArts sync.Map // color.NRGBA → image.Image
 
 // artPixels is smolArt's size: as large as a fetched header cover.
 const artPixels = coverPixels
