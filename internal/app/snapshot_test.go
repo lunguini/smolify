@@ -97,6 +97,23 @@ func TestWindowSnapshot(t *testing.T) {
 	}
 	s.page, s.settings.Theme = pageLibrary, ""
 	s.settingTheme.Select(0)
+	// Home: a section of cards, covers loaded and not.
+	s.discovery.Home = spotify.HomeFeed{Sections: []spotify.HomeSection{{Title: "Made for you", Items: []spotify.HomeItem{
+		{URI: "spotify:playlist:m1", Name: "Daily Mix 1", Kind: "Playlist", Image: "c:1"},
+		{URI: "spotify:playlist:m2", Name: "Discover Weekly", Kind: "Playlist", Image: "c:2"},
+		{URI: "spotify:album:a1", Name: "Shores", Kind: "Album", Image: "c:t"},
+		{URI: "spotify:playlist:m3", Name: "Release Radar", Kind: "Playlist", Image: "c:none"},
+	}}}}
+	s.page, s.focus = pageHome, paneLibrary
+	if img, err := window.Snapshot(a, snapOptions(110, 34), 2); err == nil {
+		if f, err := os.Create(filepath.Join(dir, "smolify-home.png")); err == nil {
+			png.Encode(f, img)
+			f.Close()
+		}
+	} else {
+		t.Fatal(err)
+	}
+	s.page = pageLibrary
 	// Liked Songs and a playlist without a cover, on Smolify's own art.
 	s.username = "adrian"
 	s.discovery.Pages = make(map[string]discoveryPage)
